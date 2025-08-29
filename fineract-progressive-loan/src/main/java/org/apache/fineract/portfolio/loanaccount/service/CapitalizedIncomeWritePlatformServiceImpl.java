@@ -20,9 +20,7 @@ package org.apache.fineract.portfolio.loanaccount.service;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
@@ -74,8 +72,6 @@ public class CapitalizedIncomeWritePlatformServiceImpl implements CapitalizedInc
     public CommandProcessingResult addCapitalizedIncome(final Long loanId, final JsonCommand command) {
         loanTransactionValidator.validateCapitalizedIncome(command, loanId);
         final Loan loan = loanAssembler.assembleFrom(loanId);
-        final List<Long> existingTransactionIds = new ArrayList<>(loanTransactionRepository.findTransactionIdsByLoan(loan));
-        final List<Long> existingReversedTransactionIds = new ArrayList<>(loanTransactionRepository.findReversedTransactionIdsByLoan(loan));
         final Map<String, Object> changes = new LinkedHashMap<>();
         // Create payment details
         final PaymentDetail paymentDetail = this.paymentDetailWritePlatformService.createAndPersistPaymentDetail(command, changes);
@@ -106,8 +102,8 @@ public class CapitalizedIncomeWritePlatformServiceImpl implements CapitalizedInc
             noteWritePlatformService.createLoanTransactionNote(capitalizedIncomeTransaction.getId(), noteText);
         }
 
-        // Post journal entries
-        journalEntryPoster.postJournalEntries(loan, existingTransactionIds, existingReversedTransactionIds);
+        // Create journal entries immediately for this transaction
+        journalEntryPoster.postJournalEntriesForLoanTransaction(capitalizedIncomeTransaction, false, false);
 
         loanLifecycleStateMachine.determineAndTransition(loan, transactionDate);
 
@@ -128,8 +124,6 @@ public class CapitalizedIncomeWritePlatformServiceImpl implements CapitalizedInc
             final JsonCommand command) {
         loanTransactionValidator.validateCapitalizedIncomeAdjustment(command, loanId, capitalizedIncomeTransactionId);
         final Loan loan = loanAssembler.assembleFrom(loanId);
-        final List<Long> existingTransactionIds = new ArrayList<>(loanTransactionRepository.findTransactionIdsByLoan(loan));
-        final List<Long> existingReversedTransactionIds = new ArrayList<>(loanTransactionRepository.findReversedTransactionIdsByLoan(loan));
         final Map<String, Object> changes = new LinkedHashMap<>();
         // Create payment details
         final PaymentDetail paymentDetail = this.paymentDetailWritePlatformService.createAndPersistPaymentDetail(command, changes);
@@ -155,8 +149,8 @@ public class CapitalizedIncomeWritePlatformServiceImpl implements CapitalizedInc
         if (noteText != null && !noteText.isEmpty()) {
             noteWritePlatformService.createLoanTransactionNote(savedCapitalizedIncomeAdjustment.getId(), noteText);
         }
-        // Post journal entries
-        journalEntryPoster.postJournalEntries(loan, existingTransactionIds, existingReversedTransactionIds);
+        // Create journal entries immediately for this transaction
+        journalEntryPoster.postJournalEntriesForLoanTransaction(savedCapitalizedIncomeAdjustment, false, false);
 
         LoanCapitalizedIncomeBalance capitalizedIncomeBalance = capitalizedIncomeBalanceRepository.findByLoanIdAndLoanTransactionId(loanId,
                 capitalizedIncomeTransactionId);
@@ -164,7 +158,7 @@ public class CapitalizedIncomeWritePlatformServiceImpl implements CapitalizedInc
                 .setAmountAdjustment(MathUtil.nullToZero(capitalizedIncomeBalance.getAmountAdjustment()).add(transactionAmount));
         capitalizedIncomeBalance.setUnrecognizedAmount(
                 MathUtil.negativeToZero(capitalizedIncomeBalance.getUnrecognizedAmount().subtract(transactionAmount)));
-        capitalizedIncomeBalanceRepository.save(capitalizedIncomeBalance);
+        capitalizedIncomeBalanceRepository.saveAndFlush(capitalizedIncomeBalance);
 
         loanLifecycleStateMachine.determineAndTransition(loan, transactionDate);
 
@@ -182,7 +176,7 @@ public class CapitalizedIncomeWritePlatformServiceImpl implements CapitalizedInc
     }
 
     private void recalculateLoanTransactions(Loan loan, LocalDate transactionDate, LoanTransaction transaction) {
-        if (loan.isInterestBearingAndInterestRecalculationEnabled() || DateUtils.isBeforeBusinessDate(transactionDate)) {
+        if (loan.isInterestRecalculationEnabled() || DateUtils.isBeforeBusinessDate(transactionDate)) {
             reprocessLoanTransactionsService.reprocessTransactions(loan);
         } else {
             reprocessLoanTransactionsService.processLatestTransaction(transaction, loan);
