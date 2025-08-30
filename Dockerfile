@@ -1,26 +1,36 @@
 # syntax=docker/dockerfile:1
 
-# -------- Build stage (Gradle) --------
-FROM eclipse-temurin:17-jdk AS build
+########### Build stage (Gradle) ###########
+FROM gradle:8.7.0-jdk17 AS build
 WORKDIR /src
 
-# Pre-copy Gradle wrapper & settings for better layer caching
+# Keep Gradle caches across builds (if BuildKit is on)
+ENV GRADLE_USER_HOME=/home/gradle/.gradle
+
+# Copy only Gradle wrapper & settings first for better caching
 COPY gradlew gradlew
-COPY gradle gradle
+COPY gradle/ gradle/
 COPY settings.gradle* build.gradle* gradle.properties* ./
 RUN chmod +x gradlew && ./gradlew --no-daemon --version
 
-# Copy the rest of the source and build (try module first, then root)
+# Now copy the rest
 COPY . .
-RUN ./gradlew --no-daemon -x test :fineract-provider:bootJar || \
-    ./gradlew  --no-daemon -x test bootJar
 
-# Collect the built JAR to a fixed path for the next stage
-RUN JAR="$(find . -path "*/build/libs/*.jar" -not -name "*-plain.jar" | head -n1)" \
+# Limit workers and set JVM heap to avoid OOM; build the bootable jar
+# Try module path first (common in Fineract), then fall back to root
+RUN ./gradlew --no-daemon -Dorg.gradle.workers.max=1 \
+    -Dorg.gradle.jvmargs="-Xmx2g -XX:+UseG1GC -Dfile.encoding=UTF-8" \
+    :fineract-provider:bootJar || \
+    ./gradlew --no-daemon -Dorg.gradle.workers.max=1 \
+    -Dorg.gradle.jvmargs="-Xmx2g -XX:+UseG1GC -Dfile.encoding=UTF-8" \
+    bootJar
+
+# Find the built jar (non-plain) and copy it to a fixed location
+RUN JAR="$(find . -path '*/build/libs/*.jar' -not -name '*-plain.jar' | head -n1)" \
  && echo "Using JAR: $JAR" \
  && cp "$JAR" /tmp/app.jar
 
-# -------- Runtime stage (slim JRE) --------
+########### Runtime stage (JRE only) ###########
 FROM eclipse-temurin:17-jre
 WORKDIR /app
 COPY --from=build /tmp/app.jar /app/app.jar
