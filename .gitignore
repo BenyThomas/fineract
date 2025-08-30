@@ -35,3 +35,7 @@ gradleExp/
 .java-version
 
 .windsurf/
+
+.git
+target
+**/*.iml
