@@ -1,22 +1,29 @@
 # syntax=docker/dockerfile:1
 
-# --- Build stage ---
-FROM maven:3.9-eclipse-temurin-17 AS build
-WORKDIR /app
+# -------- Build stage (Gradle) --------
+FROM eclipse-temurin:17-jdk AS build
+WORKDIR /src
 
-# Pre-fetch deps for better caching
-COPY pom.xml ./
-RUN mvn -q -DskipTests dependency:go-offline
+# Pre-copy Gradle wrapper & settings for better layer caching
+COPY gradlew gradlew
+COPY gradle gradle
+COPY settings.gradle* build.gradle* gradle.properties* ./
+RUN chmod +x gradlew && ./gradlew --no-daemon --version
 
-# Copy sources and build
-COPY src ./src
-RUN mvn -DskipTests clean package
+# Copy the rest of the source and build (try module first, then root)
+COPY . .
+RUN ./gradlew --no-daemon -x test :fineract-provider:bootJar || \
+    ./gradlew  --no-daemon -x test bootJar
 
-# --- Runtime stage ---
+# Collect the built JAR to a fixed path for the next stage
+RUN JAR="$(find . -path "*/build/libs/*.jar" -not -name "*-plain.jar" | head -n1)" \
+ && echo "Using JAR: $JAR" \
+ && cp "$JAR" /tmp/app.jar
+
+# -------- Runtime stage (slim JRE) --------
 FROM eclipse-temurin:17-jre
 WORKDIR /app
-# Copy the built jar (adjust pattern if your JAR name differs)
-COPY --from=build /app/target/*.jar /app/app.jar
+COPY --from=build /tmp/app.jar /app/app.jar
 
 ENV JAVA_TOOL_OPTIONS="-XX:+UseG1GC -XX:MaxRAMPercentage=75"
 EXPOSE 8080
