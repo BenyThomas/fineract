@@ -1,15 +1,17 @@
-name: Build & Deploy Fineract
+name: Build & Deploy MTM
 on:
   push:
     branches: [ "main" ]
 
 permissions:
   contents: read
-  packages: write  # required for GHCR push
+  packages: write
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    # If you stored secrets under an Environment (e.g., "prod"), uncomment:
+    # environment: prod
 
     steps:
       - uses: actions/checkout@v4
@@ -26,27 +28,39 @@ jobs:
         run: |
           OWNER_LC="$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
           echo "owner_lc=$OWNER_LC" >> $GITHUB_OUTPUT
-          echo "image=ghcr.io/${OWNER_LC}/fineract:${GITHUB_SHA}" >> $GITHUB_OUTPUT
-          echo "image_latest=ghcr.io/${OWNER_LC}/fineract:main" >> $GITHUB_OUTPUT
+          echo "image=ghcr.io/${OWNER_LC}/mtm:${GITHUB_SHA}" >> $GITHUB_OUTPUT
+          echo "image_latest=ghcr.io/${OWNER_LC}/mtm:main" >> $GITHUB_OUTPUT
 
-      # If your repo needs a Java build before dockerizing, add a step here (e.g., Gradle/Maven).
-      # Then ensure your Dockerfile copies the built JAR. If the Dockerfile already builds the app, keep as is.
+      - name: Set API base (fallback to Fineract prod URL)
+        run: |
+          API="${{ vars.VITE_API_BASE }}"
+          if [ -z "$API" ]; then API="https://fineract.kazy.co.tz/fineract-provider"; fi
+          echo "API_BASE=$API" >> $GITHUB_ENV
 
       - name: Build & Push image
         uses: docker/build-push-action@v6
         with:
           context: .
+          build-args: |
+            VITE_API_BASE=${{ env.API_BASE }}
           push: true
           tags: |
             ${{ steps.img.outputs.image }}
             ${{ steps.img.outputs.image_latest }}
 
+      # Optional preflight to fail early if a secret is missing
+      - name: Preflight secrets check
+        run: |
+          [ -n "${{ secrets.SSH_HOST }}" ] || (echo "SSH_HOST missing" && exit 1)
+          [ -n "${{ secrets.SSH_USER }}" ] || (echo "SSH_USER missing" && exit 1)
+          [ -n "${{ secrets.SSH_KEY }}"  ] || (echo "SSH_KEY missing"  && exit 1)
+
       - name: Roll out to MicroK8s
         uses: appleboy/ssh-action@v1.2.0
         with:
-          host: ${{ secrets.SSH_HOST }}
+          host:     ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
+          key:      ${{ secrets.SSH_KEY }}
           script: |
-            sudo microk8s kubectl -n kazy-prod set image deploy/fineract-server fineract-server=${{ steps.img.outputs.image }}
-            sudo microk8s kubectl -n kazy-prod rollout status deploy/fineract-server --timeout=5m
+            sudo microk8s kubectl -n kazy-prod set image deploy/mtm-web web=${{ steps.img.outputs.image }}
+            sudo microk8s kubectl -n kazy-prod rollout status deploy/mtm-web --timeout=5m
