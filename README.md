@@ -69,6 +69,23 @@ Run the following commands:
 1. `./gradlew createDB -PdbName=fineract_default`
 1. `./gradlew devRun`
 
+Fineract is now running, and will be listening for API requests on port 8443 by default.
+
+Confirm Fineract is ready with, for example:
+
+```bash
+curl --insecure https://localhost:8443/fineract-provider/actuator/health`
+```
+
+To test authenticated endpoints, include credentials in your request:
+
+```bash
+curl --location \
+  https://localhost:8443/fineract-provider/api/v1/clients \
+  --header 'Content-Type: application/json' \
+  --header 'Fineract-Platform-TenantId: default' \
+  --header 'Authorization: Basic bWlmb3M6cGFzc3dvcmQ='
+```
 
 <br>INSTRUCTIONS: How to build the JAR file
 ============
@@ -145,7 +162,7 @@ You might see something like this if a Java 11 executable (class file format ver
 UnsupportedClassVersionError: com.example.package/ClassName has been compiled by a more recent version of the Java Runtime (class file version 65.0), this version of the Java Runtime only recognizes class file versions up to 55.0
 ```
 
-These builds are run in [short-lived virtual machines](https://docs.github.com/en/actions/using-github-hosted-runners/using-github-hosted-runners), so locally reproducing the same may require additional effort, such as these extra clean-up procedures:
+The GitHub builds are run in [short-lived virtual machines](https://docs.github.com/en/actions/using-github-hosted-runners/using-github-hosted-runners), so locally reproducing the same may require additional effort, such as these extra clean-up procedures:
 
 ```bash
 # Might fix `error: cannot find symbol` or other intermittent failures.
