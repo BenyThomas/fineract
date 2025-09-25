@@ -2,7 +2,7 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: fineract-ing
-  namespace: fineract-prod
+  namespace: kazy-prod
   annotations:
     cert-manager.io/cluster-issuer: "letsencrypt-prod"
 spec:
@@ -17,4 +17,7 @@ spec:
           - path: /
             pathType: Prefix
             backend:
-              service: { name: fineract-svc, port: { number: 8080 } }
+              service:
+                name: fineract-server
+                port:
+                  number: 8080

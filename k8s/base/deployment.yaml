@@ -1,0 +1,101 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fineract-server
+  namespace: kazy-prod
+  labels:
+    app: fineract-server
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: fineract-server
+      tier: backend
+  strategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: fineract-server
+        tier: backend
+    spec:
+      initContainers:
+        - name: wait-hostdb
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "waiting for host DB at ${FINERACT_DEFAULT_TENANTDB_HOSTNAME}:${FINERACT_DEFAULT_TENANTDB_PORT}";
+              while ! nc -z ${FINERACT_DEFAULT_TENANTDB_HOSTNAME} ${FINERACT_DEFAULT_TENANTDB_PORT}; do
+                sleep 1;
+              done
+              echo "DB up";
+          env:
+            - name: FINERACT_DEFAULT_TENANTDB_HOSTNAME
+              value: "142.171.48.216"
+            - name: FINERACT_DEFAULT_TENANTDB_PORT
+              value: "3306"
+      containers:
+        - name: fineract-server
+          # CI will set this to ghcr.io/benythomas/fineract:<sha>
+          image: ghcr.io/benythomas/fineract:main
+          ports:
+            - containerPort: 8080
+              name: http
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          env:
+            - name: FINERACT_NODE_ID
+              value: "1"
+            - name: FINERACT_HIKARI_DRIVER_CLASS_NAME
+              value: org.mariadb.jdbc.Driver
+            - name: FINERACT_HIKARI_JDBC_URL
+              value: jdbc:mariadb://142.171.48.216:3306/fineract_tenants
+            - name: FINERACT_HIKARI_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: fineract-tenants-db-secret
+                  key: username
+            - name: FINERACT_HIKARI_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: fineract-tenants-db-secret
+                  key: password
+            - name: FINERACT_DEFAULT_TENANTDB_HOSTNAME
+              value: "142.171.48.216"
+            - name: FINERACT_DEFAULT_TENANTDB_PORT
+              value: "3306"
+            - name: FINERACT_DEFAULT_TENANTDB_UID
+              valueFrom:
+                secretKeyRef:
+                  name: fineract-tenants-db-secret
+                  key: username
+            - name: FINERACT_DEFAULT_TENANTDB_PWD
+              valueFrom:
+                secretKeyRef:
+                  name: fineract-tenants-db-secret
+                  key: password
+            - name: FINERACT_DEFAULT_TENANTDB_CONN_PARAMS
+              value: ""
+            - name: JAVA_TOOL_OPTIONS
+              value: "-Xmx1G"
+          readinessProbe:
+            httpGet:
+              path: /fineract-provider/actuator/health/readiness
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /fineract-provider/actuator/health/liveness
+              port: 8080
+            initialDelaySeconds: 120
+            periodSeconds: 10
+            failureThreshold: 6

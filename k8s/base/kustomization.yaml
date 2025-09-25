@@ -1,0 +1,10 @@
+namespace: kazy-prod
+
+resources:
+  - namespace.yaml
+  - service.yaml
+  - deployment.yaml
+
+images:
+  - name: ghcr.io/benythomas/fineract
+    newTag: main

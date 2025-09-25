@@ -1,0 +1,11 @@
+namespace: kazy-prod
+
+resources:
+  - ../../base
+  - ingress.yaml
+  - hpa.yaml
+
+# CI will override the image tag on-the-fly
+images:
+  - name: ghcr.io/benythomas/fineract
+    newTag: main

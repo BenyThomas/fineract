@@ -1,0 +1,88 @@
+name: Build & Deploy Fineract (main)
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tags
+        id: img
+        run: |
+          OWNER_LC="$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
+          echo "image=ghcr.io/${OWNER_LC}/fineract:${GITHUB_SHA}" >> $GITHUB_OUTPUT
+          echo "image_latest=ghcr.io/${OWNER_LC}/fineract:main" >> $GITHUB_OUTPUT
+
+      - name: Build & Push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.img.outputs.image }}
+            ${{ steps.img.outputs.image_latest }}
+
+      - name: Deploy to MicroK8s (apply kustomize overlay)
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          IMG: ${{ steps.img.outputs.image }}
+          NS: kazy-prod
+          DB_HOST: 142.171.48.216
+          DB_PORT: 3306
+          DB_USER: ${{ secrets.FINERACT_DB_USER }}
+          DB_PASS: ${{ secrets.FINERACT_DB_PASS }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          command_timeout: 20m
+          script: |
+            set -euo pipefail
+            KCTL=/snap/bin/microk8s.kubectl
+
+            # 0) Ensure namespace
+            $KCTL get ns "$NS" >/dev/null 2>&1 || $KCTL create ns "$NS"
+
+            # 1) Create/Update DB secret from repo secrets (not stored in Git)
+            $KCTL -n "$NS" delete secret fineract-tenants-db-secret >/dev/null 2>&1 || true
+            $KCTL -n "$NS" create secret generic fineract-tenants-db-secret \
+              --from-literal=username="$DB_USER" \
+              --from-literal=password="$DB_PASS"
+
+            # 2) Prepare a temp dir with kustomize overlay content and set image
+            TMPDIR="$(mktemp -d)"
+            rsync -avz --delete ./k8s/ "$TMPDIR/k8s/" >/dev/null 2>&1 || true
+
+            # 3) Set the exact image tag in the prod overlay
+            # (No kustomize binary needed; use 'sed' to replace newTag if desired,
+            #  but the base/overlay already points to :main. We'll set it explicitly.)
+            # Replace the image field inside the Deployment via 'set image' after apply.
+
+            # 4) Apply the overlay
+            $KCTL apply -k "$TMPDIR/k8s/overlays/prod"
+
+            # 5) Force Deployment to use the freshly built image
+            $KCTL -n "$NS" set image deploy/fineract-server fineract-server="$IMG"
+
+            # 6) Rollout & show endpoints
+            $KCTL -n "$NS" rollout status deploy/fineract-server --timeout=15m
+            $KCTL -n "$NS" get svc fineract-server -o wide
+            $KCTL -n "$NS" get endpoints fineract-server -o wide
