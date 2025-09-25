@@ -1,71 +1,34 @@
 name: Build & Deploy Fineract
-
 on:
   push:
     branches: [ "main" ]
 
 permissions:
   contents: read
-  packages: write  # required for GHCR push
-
-concurrency:
-  group: fineract-deploy-${{ github.ref }}
-  cancel-in-progress: true
+  packages: write
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
-    # If you stored SSH_* as Environment secrets, uncomment:
-    # environment: prod
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Login to GHCR (uses GITHUB_TOKEN)
+      - name: Login to GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Compute image tags (lowercased owner)
+      - name: Compute image tags
         id: img
         run: |
           OWNER_LC="$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
-          echo "owner_lc=$OWNER_LC" >> $GITHUB_OUTPUT
           echo "image=ghcr.io/${OWNER_LC}/fineract:${GITHUB_SHA}" >> $GITHUB_OUTPUT
           echo "image_latest=ghcr.io/${OWNER_LC}/fineract:main" >> $GITHUB_OUTPUT
 
-      # OPTIONAL: Build the JAR with Gradle if this repo contains a gradle wrapper.
-      # If your Dockerfile already builds the app, this step will be skipped harmlessly.
-      - name: Setup Java (for Gradle build)
-        if: hashFiles('gradlew') != ''
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - name: Cache Gradle
-        if: hashFiles('gradlew') != ''
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-          restore-keys: |
-            gradle-${{ runner.os }}-
-
-      - name: Grant execute for gradlew
-        if: hashFiles('gradlew') != ''
-        run: chmod +x ./gradlew
-
-      - name: Build backend JAR (skips tests for speed)
-        if: hashFiles('gradlew') != ''
-        run: ./gradlew clean bootJar -x test
-
-      - name: Build & Push Docker image
+      - name: Build & Push image
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -73,15 +36,6 @@ jobs:
           tags: |
             ${{ steps.img.outputs.image }}
             ${{ steps.img.outputs.image_latest }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      # Optional quick sanity check (comment out after first success)
-      # - name: Preflight secrets check
-      #   run: |
-      #     [ -n "${{ secrets.SSH_HOST }}" ] || (echo "SSH_HOST missing" && exit 1)
-      #     [ -n "${{ secrets.SSH_USER }}" ] || (echo "SSH_USER missing" && exit 1)
-      #     [ -n "${{ secrets.SSH_KEY }}"  ] || (echo "SSH_KEY missing"  && exit 1)
 
       - name: Roll out to MicroK8s
         uses: appleboy/ssh-action@v1.2.0
