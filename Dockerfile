@@ -1,27 +1,18 @@
-
 # syntax=docker/dockerfile:1
-FROM gradle:8.10.2-jdk21 AS build
-WORKDIR /src
-ENV GRADLE_USER_HOME=/home/gradle/.gradle
-COPY gradlew gradlew
-COPY gradle/ gradle/
-COPY settings.gradle* build.gradle* gradle.properties* ./
-RUN chmod +x gradlew && ./gradlew --no-daemon --version
-COPY . .
-RUN ./gradlew --no-daemon -Dorg.gradle.workers.max=1 \
-    -Dorg.gradle.jvmargs="-Xmx2g -XX:+UseG1GC -Dfile.encoding=UTF-8" \
-    :fineract-provider:bootJar || \
-    ./gradlew  --no-daemon -Dorg.gradle.workers.max=1 \
-    -Dorg.gradle.jvmargs="-Xmx2g -XX:+UseG1GC -Dfile.encoding=UTF-8" \
-    bootJar
-RUN JAR="$(find . -path '*/build/libs/*.jar' -not -name '*-plain.jar' | head -n1)" \
- && echo "Using JAR: $JAR" && cp "$JAR" /tmp/app.jar
 
-FROM eclipse-temurin:21-jre
+FROM eclipse-temurin:21-jre AS runtime
 WORKDIR /app
-COPY --from=build /tmp/app.jar /app/app.jar
-ENV JAVA_TOOL_OPTIONS="-XX:+UseG1GC -XX:MaxRAMPercentage=75 -Dfile.encoding=UTF-8"
+
+# Path where the CI step produced jars
+ARG JAR_PATH=fineract-provider/build/libs
+
+# Copy the first non-plain jar we find (boot jar)
+# If your artifact naming differs, adjust the glob below.
+COPY ${JAR_PATH}/*.jar /app/
+
+# Pick the jar at runtime
+RUN JAR="$(ls -1 /app/*.jar | grep -v -- '-plain.jar' | head -n1)" && \
+    ln -s "$JAR" /app/app.jar
+
 EXPOSE 8080
-HEALTHCHECK --interval=30s --timeout=3s --start-period=60s --retries=5 \
-  CMD curl -fsS http://localhost:8080/actuator/health || exit 1
 ENTRYPOINT ["java","-jar","/app/app.jar"]
