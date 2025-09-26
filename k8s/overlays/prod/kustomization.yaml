@@ -1,11 +1,12 @@
-namespace: kazy-prod
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
 
+namespace: kazy-prod
 resources:
   - ../../base
-  - ingress.yaml
   - hpa.yaml
+  - ingress.yaml
 
-# CI will override the image tag on-the-fly
 images:
   - name: ghcr.io/benythomas/fineract
-    newTag: main
+    newTag: main   # overlay expects :main; CI later sets image to the exact :<SHA>

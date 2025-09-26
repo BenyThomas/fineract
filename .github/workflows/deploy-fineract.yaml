@@ -1,13 +1,28 @@
-name: Build & Deploy Fineract (main)
+name: Build & Deploy Fineract
 
 on:
   push:
     branches: [ "main" ]
-  workflow_dispatch:
+    paths:
+      - "**/*.java"
+      - "gradle/**"
+      - "pom.xml"
+      - "Dockerfile"
+      - ".dockerignore"
+      - "k8s/**"
+      - ".github/workflows/deploy-fineract.yaml"
 
 permissions:
   contents: read
-  packages: write
+  packages: write      # GHCR push
+  id-token: write
+
+concurrency:
+  group: fineract-deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE_NAME: fineract
 
 jobs:
   build-and-deploy:
@@ -17,7 +32,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Login to GHCR
+      - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -28,61 +43,95 @@ jobs:
         id: img
         run: |
           OWNER_LC="$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
-          echo "image=ghcr.io/${OWNER_LC}/fineract:${GITHUB_SHA}" >> $GITHUB_OUTPUT
-          echo "image_latest=ghcr.io/${OWNER_LC}/fineract:main" >> $GITHUB_OUTPUT
+          echo "owner_lc=$OWNER_LC" >> $GITHUB_OUTPUT
+          echo "image_sha=ghcr.io/${OWNER_LC}/${IMAGE_NAME}:${GITHUB_SHA}" >> $GITHUB_OUTPUT
+          echo "image_main=ghcr.io/${OWNER_LC}/${IMAGE_NAME}:main" >> $GITHUB_OUTPUT
 
-      - name: Build & Push image
+      # If your Dockerfile builds the JAR itself, this is enough.
+      # If you need a Gradle/Maven build first, add it here and copy the built JAR in Dockerfile.
+
+      - name: Build & Push Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
           tags: |
-            ${{ steps.img.outputs.image }}
-            ${{ steps.img.outputs.image_latest }}
+            ${{ steps.img.outputs.image_sha }}
+            ${{ steps.img.outputs.image_main }}
 
-      - name: Deploy to MicroK8s (apply kustomize overlay)
+      # ----- Deploy to MicroK8s over SSH -----
+      - name: Deploy to MicroK8s (apply kustomize overlay and set image)
         uses: appleboy/ssh-action@v1.2.0
         env:
-          IMG: ${{ steps.img.outputs.image }}
-          NS: kazy-prod
+          IMG_SHA: ${{ steps.img.outputs.image_sha }}
+          IMG_MAIN: ${{ steps.img.outputs.image_main }}
           DB_HOST: 142.171.48.216
-          DB_PORT: 3306
-          DB_USER: ${{ secrets.FINERACT_DB_USER }}
-          DB_PASS: ${{ secrets.FINERACT_DB_PASS }}
+          DB_PORT: "3306"
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          command_timeout: 20m
           script: |
             set -euo pipefail
-            KCTL=/snap/bin/microk8s.kubectl
 
-            # 0) Ensure namespace
-            $KCTL get ns "$NS" >/dev/null 2>&1 || $KCTL create ns "$NS"
+            # 0) Convenience alias for kubectl on MicroK8s
+            K=/snap/bin/microk8s.kubectl
 
-            # 1) Create/Update DB secret from repo secrets (not stored in Git)
-            $KCTL -n "$NS" delete secret fineract-tenants-db-secret >/dev/null 2>&1 || true
-            $KCTL -n "$NS" create secret generic fineract-tenants-db-secret \
-              --from-literal=username="$DB_USER" \
-              --from-literal=password="$DB_PASS"
+            # 1) Ensure namespace exists
+            $K get ns kazy-prod >/dev/null 2>&1 || $K create ns kazy-prod
 
-            # 2) Prepare a temp dir with kustomize overlay content and set image
-            TMPDIR="$(mktemp -d)"
-            rsync -avz --delete ./k8s/ "$TMPDIR/k8s/" >/dev/null 2>&1 || true
+            # 2) (Re)create GHCR imagePullSecret from repo secret GHCR_PAT (must have read:packages)
+            $K -n kazy-prod delete secret ghcr-pull >/dev/null 2>&1 || true
+            $K -n kazy-prod create secret docker-registry ghcr-pull \
+              --docker-server=ghcr.io \
+              --docker-username='${{ github.actor }}' \
+              --docker-password='${{ secrets.GHCR_PAT }}' \
+              --docker-email='ci@local'
 
-            # 3) Set the exact image tag in the prod overlay
-            # (No kustomize binary needed; use 'sed' to replace newTag if desired,
-            #  but the base/overlay already points to :main. We'll set it explicitly.)
-            # Replace the image field inside the Deployment via 'set image' after apply.
+            # Attach secret to default SA (belt & suspenders)
+            $K -n kazy-prod patch serviceaccount default --type='json' -p='[
+              {"op":"add","path":"/imagePullSecrets","value":[{"name":"ghcr-pull"}]}
+            ]' || $K -n kazy-prod patch serviceaccount default --type='json' -p='[
+              {"op":"replace","path":"/imagePullSecrets","value":[{"name":"ghcr-pull"}]}
+            ]'
 
-            # 4) Apply the overlay
-            $KCTL apply -k "$TMPDIR/k8s/overlays/prod"
+            # 3) DB credentials secret from repo secrets (admin/admin in your case)
+            $K -n kazy-prod delete secret fineract-tenants-db-secret >/dev/null 2>&1 || true
+            $K -n kazy-prod create secret generic fineract-tenants-db-secret \
+              --from-literal=username='${{ secrets.DB_USER }}' \
+              --from-literal=password='${{ secrets.DB_PASS }}'
 
-            # 5) Force Deployment to use the freshly built image
-            $KCTL -n "$NS" set image deploy/fineract-server fineract-server="$IMG"
+            # 4) Apply your kustomize overlay (contains deployment, svc, ingress, hpa)
+            #    Your overlay image tag should be :main so first apply will pull :main
+            $K -n kazy-prod apply -k k8s/overlays/prod
 
-            # 6) Rollout & show endpoints
-            $KCTL -n "$NS" rollout status deploy/fineract-server --timeout=15m
-            $KCTL -n "$NS" get svc fineract-server -o wide
-            $KCTL -n "$NS" get endpoints fineract-server -o wide
+            # 5) Make sure Deployment uses the GHCR pull secret as well
+            $K -n kazy-prod patch deploy fineract-server --type=json -p='[
+              {"op":"add","path":"/spec/template/spec/imagePullSecrets","value":[{"name":"ghcr-pull"}]}
+            ]' || $K -n kazy-prod patch deploy fineract-server --type=json -p='[
+              {"op":"replace","path":"/spec/template/spec/imagePullSecrets","value":[{"name":"ghcr-pull"}]}
+            ]'
+
+            # 6) Ensure DB envs are present (idempotent)
+            $K -n kazy-prod set env deploy/fineract-server \
+              FINERACT_NODE_ID=1 \
+              FINERACT_HIKARI_DRIVER_CLASS_NAME=org.mariadb.jdbc.Driver \
+              FINERACT_HIKARI_JDBC_URL="jdbc:mariadb://${DB_HOST}:${DB_PORT}/fineract_tenants" \
+              FINERACT_DEFAULT_TENANTDB_HOSTNAME="${DB_HOST}" \
+              FINERACT_DEFAULT_TENANTDB_PORT="${DB_PORT}" \
+              FINERACT_DEFAULT_TENANTDB_CONN_PARAMS="" \
+              JAVA_TOOL_OPTIONS='-Xmx1G'
+
+            $K -n kazy-prod set env deploy/fineract-server \
+              --keys="FINERACT_HIKARI_USERNAME,FINERACT_HIKARI_PASSWORD,FINERACT_DEFAULT_TENANTDB_UID,FINERACT_DEFAULT_TENANTDB_PWD" \
+              --from=secret/fineract-tenants-db-secret
+
+            # 7) Force exactly the SHA image so rollout is deterministic (overlay stays pinned to :main)
+            $K -n kazy-prod set image deploy/fineract-server \
+              fineract-server="${IMG_SHA}"
+
+            # 8) Wait for rollout and show last events
+            $K -n kazy-prod rollout status deploy/fineract-server --timeout=10m
+            $K -n kazy-prod get pods -l app=fineract-server -o wide
+            $K -n kazy-prod get ingress,fineract-server -o wide || true
+            $K -n kazy-prod get events --sort-by=.lastTimestamp | tail -n 30
