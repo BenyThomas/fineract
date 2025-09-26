@@ -19,19 +19,21 @@ permissions:
   packages: write
 
 env:
-  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/fineract
   REGISTRY: ghcr.io
 
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout (full history with tags)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           fetch-tags: true
+
+      - name: Compute lowercase image name
+        run: |
+          echo "IMAGE_NAME=${{ env.REGISTRY }}/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
       - name: Set up Java 21 (Temurin)
         uses: actions/setup-java@v4
@@ -49,6 +51,16 @@ jobs:
             :fineract-provider:bootJar
           ls -l fineract-provider/build/libs
 
+      # Create a tiny Docker context so .dockerignore cannot hide the jar
+      - name: Prepare Docker context
+        run: |
+          set -euo pipefail
+          mkdir -p docker-context
+          cp Dockerfile docker-context/
+          JAR="$(ls -1 fineract-provider/build/libs/*.jar | grep -v -- '-plain.jar' | head -n1)"
+          cp "$JAR" docker-context/app.jar
+          ls -l docker-context
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
@@ -65,27 +77,28 @@ jobs:
       - name: Build & push image
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: ./docker-context
           push: true
           tags: |
             ${{ env.IMAGE_NAME }}:${{ github.sha }}
             ${{ env.IMAGE_NAME }}:main
-          build-args: |
-            JAR_PATH=fineract-provider/build/libs
 
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
-
     steps:
-      # Upload k8s/ to the server so we can apply the overlay (keeps "infra as code")
       - name: Checkout k8s manifests
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
           sparse-checkout: |
             k8s
+
+      - name: Compute lowercase image name (for deploy)
+        run: |
+          echo "IMAGE_NAME=${{ env.REGISTRY }}/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+          echo "IMAGE=${IMAGE_NAME}:main" >> $GITHUB_ENV
 
       - name: Upload k8s dir to server
         uses: appleboy/scp-action@v0.1.7
@@ -99,23 +112,13 @@ jobs:
 
       - name: Apply k8s overlay & roll out
         uses: appleboy/ssh-action@v1.2.0
-        env:
-          IMAGE: ghcr.io/${{ github.repository_owner }}/fineract:main
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           script: |
             set -euo pipefail
-            # Apply manifests from the uploaded overlay
             /snap/bin/microk8s.kubectl -n kazy-prod apply -k /tmp/fineract-k8s/overlays/prod
-
-            # Ensure the Deployment points to the freshly built image
-            /snap/bin/microk8s.kubectl -n kazy-prod set image deploy/fineract-server \
-              fineract-server=${IMAGE}
-
-            # Wait for rollout to complete
+            /snap/bin/microk8s.kubectl -n kazy-prod set image deploy/fineract-server fineract-server=${IMAGE}
             /snap/bin/microk8s.kubectl -n kazy-prod rollout status deploy/fineract-server --timeout=10m
-
-            # Optional: brief status summary
             /snap/bin/microk8s.kubectl -n kazy-prod get pods,svc,ing -o wide
