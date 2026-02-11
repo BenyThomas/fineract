@@ -58,12 +58,14 @@ import org.apache.fineract.integrationtests.common.charges.ChargesHelper;
 import org.apache.fineract.integrationtests.common.savings.SavingsAccountHelper;
 import org.apache.fineract.integrationtests.common.savings.SavingsProductHelper;
 import org.apache.fineract.integrationtests.common.savings.SavingsStatusChecker;
+import org.apache.fineract.integrationtests.common.savings.SavingsTestLifecycleExtension;
 import org.apache.fineract.portfolio.charge.domain.ChargeTimeType;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -72,6 +74,7 @@ import org.slf4j.LoggerFactory;
  */
 @SuppressWarnings({ "rawtypes" })
 @Order(2)
+@ExtendWith({ SavingsTestLifecycleExtension.class })
 public class ClientSavingsIntegrationTest {
 
     private static final Logger LOG = LoggerFactory.getLogger(ClientSavingsIntegrationTest.class);
@@ -2949,6 +2952,80 @@ public class ClientSavingsIntegrationTest {
         final Integer payChargeId = this.savingsAccountHelper.payCharge(savingsChargeId, savingsId, "200", "07 March 2013");
 
         Assertions.assertNotNull(payChargeId);
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    public void testAnnualChargePaymentAfterDueDate() {
+        Integer savingsId = null;
+        try {
+            globalConfigurationHelper.updateGlobalConfiguration(GlobalConfigurationConstants.ENABLE_BUSINESS_DATE,
+                    new PutGlobalConfigurationsRequest().enabled(true));
+
+            LocalDate submittedDate = LocalDate.of(2023, 1, 1);
+            String submittedDateString = "01 January 2023";
+            BusinessDateHelper.updateBusinessDate(requestSpec, responseSpec, BusinessDateType.BUSINESS_DATE, submittedDate);
+
+            this.savingsAccountHelper = new SavingsAccountHelper(this.requestSpec, this.responseSpec);
+
+            final Integer clientID = ClientHelper.createClient(this.requestSpec, this.responseSpec);
+            ClientHelper.verifyClientCreatedOnServer(this.requestSpec, this.responseSpec, clientID);
+
+            final String minBalanceForInterestCalculation = null;
+            final String minRequiredBalance = null;
+            final String enforceMinRequiredBalance = "false";
+            final boolean allowOverdraft = false;
+            final Integer savingsProductID = createSavingsProduct(this.requestSpec, this.responseSpec, "1000",
+                    minBalanceForInterestCalculation, minRequiredBalance, enforceMinRequiredBalance, allowOverdraft);
+            Assertions.assertNotNull(savingsProductID);
+
+            savingsId = this.savingsAccountHelper.applyForSavingsApplicationOnDate(clientID, savingsProductID, ACCOUNT_TYPE_INDIVIDUAL,
+                    submittedDateString);
+            Assertions.assertNotNull(savingsId);
+
+            HashMap savingsStatusHashMap = SavingsStatusChecker.getStatusOfSavings(this.requestSpec, this.responseSpec, savingsId);
+            SavingsStatusChecker.verifySavingsIsPending(savingsStatusHashMap);
+
+            savingsStatusHashMap = this.savingsAccountHelper.approveSavingsOnDate(savingsId, submittedDateString);
+            SavingsStatusChecker.verifySavingsIsApproved(savingsStatusHashMap);
+
+            savingsStatusHashMap = this.savingsAccountHelper.activateSavings(savingsId, submittedDateString);
+            SavingsStatusChecker.verifySavingsIsActive(savingsStatusHashMap);
+
+            final Integer chargeId = ChargesHelper.createCharges(this.requestSpec, this.responseSpec,
+                    ChargesHelper.getSavingsAnnualFeeJSON());
+            Assertions.assertNotNull(chargeId);
+
+            this.savingsAccountHelper.addChargesForSavingsWithDueDateAndFeeOnMonthDay(savingsId, chargeId, "15 February 2023", 100,
+                    "15 February");
+
+            ArrayList<HashMap> charges = this.savingsAccountHelper.getSavingsCharges(savingsId);
+            Assertions.assertEquals(1, charges.size());
+
+            HashMap savingsChargeForPay = charges.get(0);
+            Integer annualSavingsChargeId = (Integer) savingsChargeForPay.get("id");
+            float chargeAmount = (Float) savingsChargeForPay.get("amount");
+
+            LocalDate paymentDate = LocalDate.of(2023, 3, 1);
+            BusinessDateHelper.updateBusinessDate(requestSpec, responseSpec, BusinessDateType.BUSINESS_DATE, paymentDate);
+
+            Integer payChargeTransactionId = this.savingsAccountHelper.payCharge(annualSavingsChargeId, savingsId,
+                    String.valueOf(chargeAmount), paymentDate);
+            Assertions.assertNotNull(payChargeTransactionId);
+
+            HashMap paidCharge = this.savingsAccountHelper.getSavingsCharge(savingsId, annualSavingsChargeId);
+            Float amountPaid = (Float) paidCharge.get("amountPaid");
+            assertTrue(Math.abs(chargeAmount - amountPaid) < 0.01);
+
+        } finally {
+            if (savingsId != null) {
+                BusinessDateHelper.updateBusinessDate(requestSpec, responseSpec, BusinessDateType.BUSINESS_DATE,
+                        LocalDate.of(2024, 11, 11));
+                savingsAccountHelper.closeSavingsAccountOnDate(savingsId, "true", "11 November 2024");
+            }
+            globalConfigurationHelper.updateGlobalConfiguration(GlobalConfigurationConstants.ENABLE_BUSINESS_DATE,
+                    new PutGlobalConfigurationsRequest().enabled(false));
+        }
     }
 
     @Test

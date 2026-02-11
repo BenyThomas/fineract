@@ -66,7 +66,6 @@ public class LoanDisbursementService {
 
     private final LoanChargeValidator loanChargeValidator;
     private final LoanDisbursementValidator loanDisbursementValidator;
-    private final ReprocessLoanTransactionsService reprocessLoanTransactionsService;
     private final LoanChargeService loanChargeService;
     private final LoanBalanceService loanBalanceService;
     private final LoanJournalEntryPoster loanJournalEntryPoster;
@@ -139,7 +138,7 @@ public class LoanDisbursementService {
                 disburseAmount = disburseAmount.zero();
                 for (LoanDisbursementDetails disbursementDetails : details) {
                     disbursementDetails.updateActualDisbursementDate(actualDisbursementDate);
-                    disburseAmount = disburseAmount.plus(disbursementDetails.principal());
+                    disburseAmount = disburseAmount.plus(disbursementDetails.getPrincipal());
                 }
             }
         } else {
@@ -163,7 +162,7 @@ public class LoanDisbursementService {
                     // First try to find a tranche that exactly matches the requested disbursement amount
                     for (LoanDisbursementDetails disbursementDetails : details) {
                         if (disbursementDetails.actualDisbursementDate() == null
-                                && disbursementDetails.principal().compareTo(principalDisbursed) == 0) {
+                                && disbursementDetails.getPrincipal().compareTo(principalDisbursed) == 0) {
                             selectedTranche = disbursementDetails;
                             break;
                         }
@@ -199,9 +198,9 @@ public class LoanDisbursementService {
                 BigDecimal setPrincipalAmount = BigDecimal.ZERO;
                 for (LoanDisbursementDetails disbursementDetails : loanDisburseDetails) {
                     if (disbursementDetails.actualDisbursementDate() != null) {
-                        setPrincipalAmount = setPrincipalAmount.add(disbursementDetails.principal());
+                        setPrincipalAmount = setPrincipalAmount.add(disbursementDetails.getPrincipal());
                     }
-                    totalAmount = totalAmount.add(disbursementDetails.principal());
+                    totalAmount = totalAmount.add(disbursementDetails.getPrincipal());
                 }
                 loan.getLoanRepaymentScheduleDetail().setPrincipal(setPrincipalAmount);
             } else {
@@ -326,7 +325,7 @@ public class LoanDisbursementService {
             for (LoanCharge loanCharge : tempCharges) {
                 loanChargeValidator.validateLoanIsNotClosed(loan, loanCharge);
                 loanChargeValidator.validateLoanChargeIsNotWaived(loan, loanCharge);
-                reprocessLoanTransactionsService.removeLoanCharge(loan, loanCharge);
+                loanChargeService.removeLoanCharge(loan, loanCharge);
             }
             loan.getTrancheCharges().clear();
         } else {
@@ -336,7 +335,7 @@ public class LoanDisbursementService {
                     if (loan.getCharges().contains(deleteCharge)) {
                         loanChargeValidator.validateLoanIsNotClosed(loan, deleteCharge);
                         loanChargeValidator.validateLoanChargeIsNotWaived(loan, deleteCharge);
-                        reprocessLoanTransactionsService.removeLoanCharge(loan, deleteCharge);
+                        loanChargeService.removeLoanCharge(loan, deleteCharge);
                     }
                 }
             }
@@ -359,7 +358,7 @@ public class LoanDisbursementService {
                     loanChargeValidator.validateLoanChargeIsNotWaived(loan, charge); //
                     return true; //
                 }) //
-                .forEach(loanCharge -> reprocessLoanTransactionsService.removeLoanCharge(loan, loanCharge));
+                .forEach(loanCharge -> loanChargeService.removeLoanCharge(loan, loanCharge));
     }
 
     // This method returns date format and locale if present in the JsonCommand
@@ -436,7 +435,7 @@ public class LoanDisbursementService {
             LoanDisbursementDetails singleDetail = undisbursedDetails.iterator().next();
             BigDecimal loanPrincipal = loan.getLoanRepaymentScheduleDetail().getPrincipal().getAmount();
 
-            if (singleDetail.principal().compareTo(loanPrincipal) == 0) {
+            if (singleDetail.getPrincipal().compareTo(loanPrincipal) == 0) {
                 return false;
             }
         }
@@ -453,7 +452,8 @@ public class LoanDisbursementService {
 
         return disbursementDetails.stream()
                 .sorted(Comparator.comparing(LoanDisbursementDetails::expectedDisbursementDate)
-                        .thenComparing((LoanDisbursementDetails d1, LoanDisbursementDetails d2) -> d2.principal().compareTo(d1.principal()))
+                        .thenComparing(
+                                (LoanDisbursementDetails d1, LoanDisbursementDetails d2) -> d2.getPrincipal().compareTo(d1.getPrincipal()))
                         .thenComparing(LoanDisbursementDetails::getId))
                 .collect(Collectors.toList());
     }

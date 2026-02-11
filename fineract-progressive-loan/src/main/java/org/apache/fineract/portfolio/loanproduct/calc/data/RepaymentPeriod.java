@@ -32,10 +32,11 @@ import lombok.Getter;
 import lombok.Setter;
 import lombok.ToString;
 import org.apache.fineract.infrastructure.core.serialization.gson.JsonExclude;
+import org.apache.fineract.infrastructure.core.service.DateUtils;
 import org.apache.fineract.infrastructure.core.service.MathUtil;
 import org.apache.fineract.organisation.monetary.domain.MonetaryCurrency;
 import org.apache.fineract.organisation.monetary.domain.Money;
-import org.apache.fineract.portfolio.loanproduct.domain.LoanProductMinimumRepaymentScheduleRelatedDetail;
+import org.apache.fineract.portfolio.loanproduct.domain.ILoanConfigurationDetails;
 import org.apache.fineract.portfolio.util.Memo;
 
 @ToString(exclude = { "previous" })
@@ -44,8 +45,9 @@ public class RepaymentPeriod {
 
     @JsonExclude
     private final RepaymentPeriod previous;
+    @Setter
     @Getter
-    private final LocalDate fromDate;
+    private LocalDate fromDate;
     @Setter
     @Getter
     private LocalDate dueDate;
@@ -84,13 +86,33 @@ public class RepaymentPeriod {
     private Money totalCapitalizedIncomeAmount;
     @JsonExclude
     @Getter
-    private final LoanProductMinimumRepaymentScheduleRelatedDetail loanProductRelatedDetail;
+    private final ILoanConfigurationDetails loanProductRelatedDetail;
     @JsonExclude
+    @Setter
     private MonetaryCurrency currency;
+
+    @Getter
+    @Setter
+    private Money creditedPrincipalMovedDueReAge;
+    @Getter
+    @Setter
+    private Money creditedInterestMovedDueReAge;
+    @Setter
+    @Getter
+    private boolean noUnrecognisedInterest;
+    @Setter
+    @Getter
+    private boolean reAged;
+    @Setter
+    @Getter
+    private boolean reAgedEarlyRepaymentHolder;
+    @Setter
+    private Money fixedInterest;
 
     protected RepaymentPeriod(RepaymentPeriod previous, LocalDate fromDate, LocalDate dueDate, List<InterestPeriod> interestPeriods,
             Money emi, Money originalEmi, Money paidPrincipal, Money paidInterest, Money futureUnrecognizedInterest, MathContext mc,
-            LoanProductMinimumRepaymentScheduleRelatedDetail loanProductRelatedDetail) {
+            ILoanConfigurationDetails loanProductRelatedDetail, boolean noUnrecognisedInterest, boolean reAged,
+            boolean reAgedEarlyRepaymentHolder, Money fixedInterest) {
         this.previous = previous;
         this.fromDate = fromDate;
         this.dueDate = dueDate;
@@ -102,18 +124,24 @@ public class RepaymentPeriod {
         this.futureUnrecognizedInterest = futureUnrecognizedInterest;
         this.mc = mc;
         this.loanProductRelatedDetail = loanProductRelatedDetail;
+        this.noUnrecognisedInterest = noUnrecognisedInterest;
+        this.reAged = reAged;
+        this.reAgedEarlyRepaymentHolder = reAgedEarlyRepaymentHolder;
+        this.fixedInterest = fixedInterest;
+        this.creditedInterestMovedDueReAge = Money.zero(loanProductRelatedDetail.getCurrencyData(), mc);
+        this.creditedInterestMovedDueReAge = Money.zero(loanProductRelatedDetail.getCurrencyData(), mc);
     }
 
-    public static RepaymentPeriod empty(RepaymentPeriod previous, MathContext mc,
-            LoanProductMinimumRepaymentScheduleRelatedDetail loanProductRelatedDetail) {
-        return new RepaymentPeriod(previous, null, null, new ArrayList<>(), null, null, null, null, null, mc, loanProductRelatedDetail);
+    public static RepaymentPeriod empty(RepaymentPeriod previous, MathContext mc, ILoanConfigurationDetails loanProductRelatedDetail) {
+        return new RepaymentPeriod(previous, null, null, new ArrayList<>(), null, null, null, null, null, mc, loanProductRelatedDetail,
+                false, false, false, null);
     }
 
     public static RepaymentPeriod create(RepaymentPeriod previous, LocalDate fromDate, LocalDate dueDate, Money emi, MathContext mc,
-            LoanProductMinimumRepaymentScheduleRelatedDetail loanProductRelatedDetail) {
+            ILoanConfigurationDetails loanProductRelatedDetail) {
         final Money zero = emi.zero();
         final RepaymentPeriod newRepaymentPeriod = new RepaymentPeriod(previous, fromDate, dueDate, new ArrayList<>(), emi, emi, zero, zero,
-                zero, mc, loanProductRelatedDetail);
+                zero, mc, loanProductRelatedDetail, false, false, false, zero);
         // There is always at least 1 interest period, by default with same from-due date as repayment period
         newRepaymentPeriod.getInterestPeriods().add(InterestPeriod.withEmptyAmounts(newRepaymentPeriod, fromDate, dueDate));
         return newRepaymentPeriod;
@@ -123,7 +151,14 @@ public class RepaymentPeriod {
         final RepaymentPeriod newRepaymentPeriod = new RepaymentPeriod(previous, repaymentPeriod.getFromDate(),
                 repaymentPeriod.getDueDate(), new ArrayList<>(), repaymentPeriod.getEmi(), repaymentPeriod.getOriginalEmi(),
                 repaymentPeriod.getPaidPrincipal(), repaymentPeriod.getPaidInterest(), repaymentPeriod.getFutureUnrecognizedInterest(), mc,
-                repaymentPeriod.getLoanProductRelatedDetail());
+                repaymentPeriod.getLoanProductRelatedDetail(), repaymentPeriod.isNoUnrecognisedInterest(), repaymentPeriod.isReAged(),
+                repaymentPeriod.isReAgedEarlyRepaymentHolder(), repaymentPeriod.getFixedInterest());
+        newRepaymentPeriod.setCreditedPrincipalMovedDueReAge(repaymentPeriod.getCreditedPrincipalMovedDueReAge());
+        newRepaymentPeriod.setCreditedInterestMovedDueReAge(repaymentPeriod.getCreditedInterestMovedDueReAge());
+        newRepaymentPeriod.setTotalDisbursedAmount(repaymentPeriod.getTotalDisbursedAmount());
+        newRepaymentPeriod.setTotalCapitalizedIncomeAmount(repaymentPeriod.getTotalCapitalizedIncomeAmount());
+        newRepaymentPeriod.setInterestMoved(repaymentPeriod.isInterestMoved());
+        newRepaymentPeriod.setCurrency(repaymentPeriod.getCurrency());
         // There is always at least 1 interest period, by default with same from-due date as repayment period
         for (InterestPeriod interestPeriod : repaymentPeriod.getInterestPeriods()) {
             newRepaymentPeriod.getInterestPeriods().add(InterestPeriod.copy(newRepaymentPeriod, interestPeriod, mc));
@@ -135,7 +170,14 @@ public class RepaymentPeriod {
         final Money zero = Money.zero(repaymentPeriod.getCurrency(), mc);
         final RepaymentPeriod newRepaymentPeriod = new RepaymentPeriod(previous, repaymentPeriod.getFromDate(),
                 repaymentPeriod.getDueDate(), new ArrayList<>(), repaymentPeriod.getEmi(), repaymentPeriod.getOriginalEmi(), zero, zero,
-                zero, mc, repaymentPeriod.getLoanProductRelatedDetail());
+                zero, mc, repaymentPeriod.getLoanProductRelatedDetail(), repaymentPeriod.isNoUnrecognisedInterest(),
+                repaymentPeriod.isReAged(), repaymentPeriod.isReAgedEarlyRepaymentHolder(), repaymentPeriod.getFixedInterest());
+        newRepaymentPeriod.setCreditedPrincipalMovedDueReAge(repaymentPeriod.getCreditedPrincipalMovedDueReAge());
+        newRepaymentPeriod.setCreditedInterestMovedDueReAge(repaymentPeriod.getCreditedInterestMovedDueReAge());
+        newRepaymentPeriod.setTotalDisbursedAmount(repaymentPeriod.getTotalDisbursedAmount());
+        newRepaymentPeriod.setTotalCapitalizedIncomeAmount(repaymentPeriod.getTotalCapitalizedIncomeAmount());
+        newRepaymentPeriod.setInterestMoved(repaymentPeriod.isInterestMoved());
+        newRepaymentPeriod.setCurrency(repaymentPeriod.getCurrency());
         // There is always at least 1 interest period, by default with same from-due date as repayment period
         for (InterestPeriod interestPeriod : repaymentPeriod.getInterestPeriods()) {
             var interestPeriodCopy = InterestPeriod.copy(newRepaymentPeriod, interestPeriod);
@@ -175,10 +217,27 @@ public class RepaymentPeriod {
     @NotNull
     public Money getCalculatedDueInterest() {
         if (calculatedDueInterestCalculation == null) {
-            calculatedDueInterestCalculation = Memo.of(this::calculateCalculatedDueInterest, () -> new Object[] { this.previous,
-                    this.interestPeriods, this.futureUnrecognizedInterest, this.isInterestMoved, this.totalDisbursedAmount });
+            calculatedDueInterestCalculation = Memo.of(this::calculateCalculatedDueInterest, () -> new Object[] { previous, interestPeriods,
+                    futureUnrecognizedInterest, isInterestMoved, totalDisbursedAmount, fixedInterest, reAged });
         }
         return calculatedDueInterestCalculation.get();
+    }
+
+    public Money calculateFixedInterestTillDate() {
+        Money calculatedFixedInterest = getZero();
+        if (!getFixedInterest().isZero()) {
+            long length = DateUtils.getDifferenceInDays(getFromDate(), getDueDate());
+            if (length == 0 || getInterestPeriods() == null || getInterestPeriods().isEmpty()) {
+                // if the repayment period length is zero. return reAgedInterest.
+                calculatedFixedInterest = getFixedInterest();
+            } else {
+                long interestCalculationLength = DateUtils.getDifferenceInDays(getInterestPeriods().getFirst().getFromDate(),
+                        getInterestPeriods().getLast().getDueDate());
+                calculatedFixedInterest = Money.of(getZero().getCurrencyData(), BigDecimal.valueOf(interestCalculationLength)
+                        .divide(BigDecimal.valueOf(length), getMc()).multiply(getFixedInterest().getAmount(), getMc()));
+            }
+        }
+        return calculatedFixedInterest;
     }
 
     public Money calculateCalculatedDueInterest() {
@@ -188,6 +247,7 @@ public class RepaymentPeriod {
                     getInterestPeriods().stream().map(InterestPeriod::getCalculatedDueInterest).reduce(BigDecimal.ZERO, BigDecimal::add),
                     mc);
         }
+        calculatedDueInterest = calculatedDueInterest.add(getFixedInterest());
         calculatedDueInterest = calculatedDueInterest.add(getFutureUnrecognizedInterest(), getMc());
         if (getPrevious().isPresent()) {
             calculatedDueInterest = calculatedDueInterest.add(getPrevious().get().getUnrecognizedInterest(), getMc());
@@ -208,7 +268,7 @@ public class RepaymentPeriod {
                             : MathUtil.min(getCalculatedDueInterest(), getEmiPlusCreditedAmountsPlusFutureUnrecognizedInterest(), false),
                             getPaidInterest(), false),
                     () -> new Object[] { paidPrincipal, paidInterest, interestPeriods, futureUnrecognizedInterest, totalDisbursedAmount,
-                            emi });
+                            fixedInterest, reAged, emi });
         }
         return dueInterestCalculation.get();
     }
@@ -283,7 +343,8 @@ public class RepaymentPeriod {
      * @return
      */
     public Money getTotalCreditedAmount() {
-        return getCreditedPrincipal().plus(getCreditedInterest(), getMc());
+        return getCreditedPrincipal().plus(getCreditedInterest(), getMc()).minus(getCreditedInterestMovedDueReAge(), getMc())
+                .minus(getCreditedPrincipalMovedDueReAge(), getMc());
     }
 
     /**
@@ -306,7 +367,7 @@ public class RepaymentPeriod {
      * @return
      */
     public Money getUnrecognizedInterest() {
-        return getCalculatedDueInterest().minus(getDueInterest(), getMc());
+        return noUnrecognisedInterest ? getZero() : getCalculatedDueInterest().minus(getDueInterest(), getMc());
     }
 
     public Money getCreditedAmounts() {
@@ -451,5 +512,14 @@ public class RepaymentPeriod {
 
     public Money getTotalCapitalizedIncomeAmount() {
         return MathUtil.nullToZero(totalCapitalizedIncomeAmount, getCurrency(), getMc());
+    }
+
+    public Money getFixedInterest() {
+        return MathUtil.nullToZero(fixedInterest, getCurrency(), getMc());
+    }
+
+    public void moveOutstandingDueToReAging() {
+        setCreditedPrincipalMovedDueReAge(getCreditedPrincipal());
+        setCreditedInterestMovedDueReAge(getCreditedInterest());
     }
 }

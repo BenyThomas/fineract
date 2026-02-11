@@ -94,7 +94,7 @@ public class LoanProductAssembler {
         final InterestMethod interestMethod = InterestMethod.fromInt(command.integerValueOfParameterNamed("interestType"));
         final InterestCalculationPeriodMethod interestCalculationPeriodMethod = InterestCalculationPeriodMethod
                 .fromInt(command.integerValueOfParameterNamed("interestCalculationPeriodType"));
-        final boolean allowPartialPeriodInterestCalcualtion = command
+        final boolean allowPartialPeriodInterestCalculation = command
                 .booleanPrimitiveValueOfParameterNamed(LoanProductConstants.ALLOW_PARTIAL_PERIOD_INTEREST_CALCUALTION_PARAM_NAME);
         final AmortizationMethod amortizationMethod = AmortizationMethod.fromInt(command.integerValueOfParameterNamed("amortizationType"));
         final PeriodFrequencyType repaymentFrequencyType = PeriodFrequencyType
@@ -113,6 +113,10 @@ public class LoanProductAssembler {
         Integer minimumGapBetweenInstallments = null;
         Integer maximumGapBetweenInstallments = null;
 
+        // Declaring this variable here to be used throughout the file
+        final DaysInYearType daysInYearType = DaysInYearType
+                .fromInt(command.integerValueOfParameterNamed(LoanProductConstants.DAYS_IN_YEAR_TYPE_PARAMETER_NAME));
+
         final Integer repaymentEvery = command.integerValueOfParameterNamed("repaymentEvery");
         final Integer numberOfRepayments = command.integerValueOfParameterNamed("numberOfRepayments");
         final Boolean isLinkedToFloatingInterestRates = command.booleanObjectValueOfParameterNamed("isLinkedToFloatingInterestRates");
@@ -129,7 +133,7 @@ public class LoanProductAssembler {
             minInterestRatePerPeriod = command.bigDecimalValueOfParameterNamed("minInterestRatePerPeriod");
             maxInterestRatePerPeriod = command.bigDecimalValueOfParameterNamed("maxInterestRatePerPeriod");
             annualInterestRate = aprCalculator.calculateFrom(interestFrequencyType, interestRatePerPeriod, numberOfRepayments,
-                    repaymentEvery, repaymentFrequencyType);
+                    repaymentEvery, repaymentFrequencyType, daysInYearType);
 
         }
 
@@ -204,9 +208,6 @@ public class LoanProductAssembler {
         final DaysInMonthType daysInMonthType = DaysInMonthType
                 .fromInt(command.integerValueOfParameterNamed(LoanProductConstants.DAYS_IN_MONTH_TYPE_PARAMETER_NAME));
 
-        final DaysInYearType daysInYearType = DaysInYearType
-                .fromInt(command.integerValueOfParameterNamed(LoanProductConstants.DAYS_IN_YEAR_TYPE_PARAMETER_NAME));
-
         final DaysInYearCustomStrategyType daysInYearCustomStrategy = command.enumValueOfParameterNamed(
                 LoanProductConstants.DAYS_IN_YEAR_CUSTOM_STRATEGY_TYPE_PARAMETER_NAME, DaysInYearCustomStrategyType.class);
 
@@ -265,6 +266,9 @@ public class LoanProductAssembler {
                 .stringValueOfParameterNamedAllowingNull(LoanProductConstants.OVER_APPLIED_CALCULATION_TYPE);
 
         final Integer overAppliedNumber = command.integerValueOfParameterNamed(LoanProductConstants.OVER_APPLIED_NUMBER);
+
+        final boolean allowFullTermForTranche = command.parameterExists(LoanProductConstants.ALLOW_FULL_TERM_FOR_TRANCHE_PARAM_NAME)
+                && command.booleanPrimitiveValueOfParameterNamed(LoanProductConstants.ALLOW_FULL_TERM_FOR_TRANCHE_PARAM_NAME);
 
         final Integer dueDaysForRepaymentEvent = command.integerValueOfParameterNamed(LoanProductConstants.DUE_DAYS_FOR_REPAYMENT_EVENT);
         final Integer overDueDaysForRepaymentEvent = command
@@ -333,7 +337,7 @@ public class LoanProductAssembler {
         return new LoanProduct(fund, loanTransactionProcessingStrategy, loanProductPaymentAllocationRules, loanProductCreditAllocationRules,
                 name, shortName, description, currency, principal, minPrincipal, maxPrincipal, interestRatePerPeriod,
                 minInterestRatePerPeriod, maxInterestRatePerPeriod, interestFrequencyType, annualInterestRate, interestMethod,
-                interestCalculationPeriodMethod, allowPartialPeriodInterestCalcualtion, repaymentEvery, repaymentFrequencyType,
+                interestCalculationPeriodMethod, allowPartialPeriodInterestCalculation, repaymentEvery, repaymentFrequencyType,
                 numberOfRepayments, minNumberOfRepayments, maxNumberOfRepayments, graceOnPrincipalPayment,
                 recurringMoratoriumOnPrincipalPeriods, graceOnInterestPayment, graceOnInterestCharged, amortizationMethod,
                 inArrearsTolerance, productCharges, accountingRuleType, includeInBorrowerCycle, startDate, closeDate, externalId,
@@ -352,7 +356,7 @@ public class LoanProductAssembler {
                 enableAccrualActivityPosting, supportedInterestRefundTypes, chargeOffBehaviour, interestRecognitionOnDisbursementDate,
                 daysInYearCustomStrategy, enableIncomeCapitalization, capitalizedIncomeCalculationType, capitalizedIncomeStrategy,
                 capitalizedIncomeType, enableBuyDownFee, buyDownFeeCalculationType, buyDownFeeStrategy, buyDownFeeIncomeType,
-                merchantBuyDownFee);
+                merchantBuyDownFee, allowFullTermForTranche);
 
     }
 

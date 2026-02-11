@@ -37,6 +37,7 @@ buildscript {
                 'fineract-charge',
                 'fineract-rates',
                 'fineract-tax',
+                'fineract-loan-origination',
                 'fineract-loan',
                 'fineract-savings',
                 'fineract-report',
@@ -44,6 +45,7 @@ buildscript {
                 'twofactor-tests',
                 'oauth2-tests',
                 'fineract-client',
+                'fineract-client-feign',
                 'fineract-avro-schemas',
                 'fineract-e2e-tests-core',
                 'fineract-e2e-tests-runner',
@@ -55,6 +57,7 @@ buildscript {
             [
                 'fineract-avro-schemas',
                 'fineract-client',
+                'fineract-client-feign',
                 'fineract-core',
                 'fineract-cob',
                 'fineract-validation',
@@ -65,6 +68,7 @@ buildscript {
                 'fineract-charge',
                 'fineract-rates',
                 'fineract-tax',
+                'fineract-loan-origination',
                 'fineract-loan',
                 'fineract-savings',
                 'fineract-report',
@@ -100,7 +104,7 @@ plugins {
     id 'com.github.hierynomus.license' version '0.16.1' apply false
     id 'com.github.jk1.dependency-license-report' version '2.9' apply false
     id 'org.zeroturnaround.gradle.jrebel' version '1.2.0' apply false
-    id 'org.springframework.boot' version '3.5.5' apply false
+    id 'org.springframework.boot' version '3.5.6' apply false
     id 'net.ltgt.errorprone' version '4.1.0' apply false
     id 'io.swagger.core.v3.swagger-gradle-plugin' version '2.2.23' apply false
     id 'com.gorylenko.gradle-git-properties' version '2.4.2' apply false
@@ -115,6 +119,7 @@ plugins {
     id 'org.openapi.generator' version '7.8.0' apply false
     id 'com.gradleup.shadow' version '8.3.5' apply false
     id 'me.champeau.jmh' version '0.7.1' apply false
+    id 'org.cyclonedx.bom' version '3.1.0' apply false
 }
 
 apply from: "${rootDir}/buildSrc/src/main/groovy/org.apache.fineract.release.gradle"
@@ -159,6 +164,15 @@ allprojects  {
 
     repositories {
         mavenCentral()
+    }
+
+    configurations.configureEach {
+        resolutionStrategy {
+            dependencySubstitution {
+                // Substitution is to resolve CVE-2025-12183
+                substitute module('org.lz4:lz4-java') using module('at.yawk.lz4:lz4-java:1.10.1')
+            }
+        }
     }
 
     configurations {
@@ -342,8 +356,7 @@ allprojects  {
             "**/generated/**/*MapperImpl.java",
             '**/META-INF/fineract-test.config',
             // Apache-specific GitHub metadata settings file
-            '/.asf.yaml',
-            '**/*.sh'
+            '/.asf.yaml'
         ]
     }
 }
@@ -379,7 +392,7 @@ configure(project.fineractJavaProjects) {
     }
 
     // Add performance optimizations
-    configurations.all {
+    configurations.configureEach {
         resolutionStrategy {
             cacheChangingModulesFor 0, 'seconds'
             cacheDynamicVersionsFor 0, 'seconds'
@@ -427,40 +440,40 @@ configure(project.fineractJavaProjects) {
     configurations {
         api.setCanBeResolved(true)
     }
-    tasks.withType(Copy) {
+    tasks.withType(Copy).configureEach {
         duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     }
-    tasks.withType(JavaCompile) {
+    tasks.withType(JavaCompile).configureEach {
         options.compilerArgs += [
-            "-Xlint:cast",
-            "-Xlint:auxiliaryclass",
-            "-Xlint:dep-ann",
-            "-Xlint:divzero",
-            "-Xlint:empty",
-            "-Xlint:exports",
-            "-Xlint:fallthrough",
-            "-Xlint:finally",
-            "-Xlint:module",
-            "-Xlint:opens",
-            "-Xlint:options",
-            "-Xlint:overloads",
-            "-Xlint:overrides",
-            "-Xlint:path",
-            "-Xlint:processing",
-            "-Xlint:removal",
-            "-Xlint:requires-automatic",
-            "-Xlint:requires-transitive-automatic",
-            "-Xlint:try",
-            "-Xlint:varargs",
-            "-Xlint:preview",
-            "-Xlint:static",
-            // -Werror needs to be disabled because EclipseLink's static weaving doesn't generate warning-free code
-            // and during an IntelliJ recompilation, it fails
-            //"-Werror",
-            "-Xmaxwarns",
-            "1500",
-            "-Xmaxerrs",
-            "1500"
+                "-Xlint:cast",
+                "-Xlint:auxiliaryclass",
+                "-Xlint:dep-ann",
+                "-Xlint:divzero",
+                "-Xlint:empty",
+                "-Xlint:exports",
+                "-Xlint:fallthrough",
+                "-Xlint:finally",
+                "-Xlint:module",
+                "-Xlint:opens",
+                "-Xlint:options",
+                "-Xlint:overloads",
+                "-Xlint:overrides",
+                "-Xlint:path",
+                "-Xlint:processing",
+                "-Xlint:removal",
+                "-Xlint:requires-automatic",
+                "-Xlint:requires-transitive-automatic",
+                "-Xlint:try",
+                "-Xlint:varargs",
+                "-Xlint:preview",
+                "-Xlint:static",
+                // -Werror needs to be disabled because EclipseLink's static weaving doesn't generate warning-free code
+                // and during an IntelliJ recompilation, it fails
+                //"-Werror",
+                "-Xmaxwarns",
+                "1500",
+                "-Xmaxerrs",
+                "1500"
         ]
         // TODO FINERACT-959 (gradually) enable -Xlint:all (see "javac -help -X")
 
@@ -556,6 +569,9 @@ configure(project.fineractJavaProjects) {
         options.errorprone {
             enabled = project.gradle.startParameter.taskNames.contains('build') || project.gradle.startParameter.taskNames.contains('check')
             if (project.path == ':fineract-client') {
+                excludedPaths = '.*/build/generated/java/src/main/java/.*'
+            }
+            if (project.path == ':fineract-client-feign') {
                 excludedPaths = '.*/build/generated/java/src/main/java/.*'
             }
             disable(
@@ -743,11 +759,13 @@ configure(project.fineractJavaProjects) {
         ]
     }
 
-    tasks.withType(Javadoc) {
-        options.addStringOption('Xdoclint:none', '-quiet')
-        options.encoding = 'UTF-8'
-        // Ignore any errors during javadoc generation
-        failOnError = false
+    tasks.withType(Javadoc).tap {
+        configureEach {
+            options.addStringOption('Xdoclint:none', '-quiet')
+            options.encoding = 'UTF-8'
+            // Ignore any errors during javadoc generation
+            failOnError = false
+        }
     }
 }
 
@@ -873,17 +891,31 @@ configure(project.fineractPublishProjects) {
     }
 }
 
-task printSourceSetInformation() {
-    doLast{
+// Configuration for CycloneDX SBOM generator
+// https://github.com/CycloneDX/cyclonedx-gradle-plugin
+apply plugin: 'org.cyclonedx.bom'
+
+cyclonedxBom {
+    projectType = "application"
+    includeBomSerialNumber = true
+    includeLicenseText = true
+}
+
+tasks.register('printSourceSetInformation') {
+    doLast {
         sourceSets.each { srcSet ->
-            println "["+srcSet.name+"]"
-            print "-->Source directories: "+srcSet.allJava.srcDirs+"\n"
-            print "-->Output directories: "+srcSet.output.classesDirs.files+"\n"
+            println "[" + srcSet.name + "]"
+            print "-->Source directories: " + srcSet.allJava.srcDirs + "\n"
+            print "-->Output directories: " + srcSet.output.classesDirs.files + "\n"
             print "-->Compile classpath:\n"
             srcSet.compileClasspath.files.each {
-                print "  "+it.path+"\n"
+                print "  " + it.path + "\n"
             }
             println ""
         }
     }
+}
+
+tasks.withType(Checkstyle).configureEach {
+    exclude("**/*.avsc")
 }

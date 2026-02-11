@@ -60,7 +60,7 @@ public class LoanProductChargeOffReasonMappingsTest extends BaseLoanIntegrationT
             Assertions.assertEquals(expenseAccount.getAccountID().longValue(),
                     loanProductDetails.getChargeOffReasonToExpenseAccountMappings().get(0).getExpenseAccount().getId());
             Assertions.assertEquals(Long.valueOf(chargeOffReasons),
-                    loanProductDetails.getChargeOffReasonToExpenseAccountMappings().get(0).getChargeOffReasonCodeValue().getId());
+                    loanProductDetails.getChargeOffReasonToExpenseAccountMappings().get(0).getReasonCodeValue().getId());
 
             List<PostChargeOffReasonToExpenseAccountMappings> chargeOffReasonToExpenseAccountMappings = createPostChargeOffReasonToExpenseAccountMappings(
                     Long.valueOf(chargeOffReasons), otherExpenseAccount.getAccountID().longValue());
@@ -72,7 +72,7 @@ public class LoanProductChargeOffReasonMappingsTest extends BaseLoanIntegrationT
             Assertions.assertEquals(otherExpenseAccount.getAccountID().longValue(),
                     loanProductDetails.getChargeOffReasonToExpenseAccountMappings().get(0).getExpenseAccount().getId());
             Assertions.assertEquals(Long.valueOf(chargeOffReasons),
-                    loanProductDetails.getChargeOffReasonToExpenseAccountMappings().get(0).getChargeOffReasonCodeValue().getId());
+                    loanProductDetails.getChargeOffReasonToExpenseAccountMappings().get(0).getReasonCodeValue().getId());
         });
     }
 
@@ -222,7 +222,7 @@ public class LoanProductChargeOffReasonMappingsTest extends BaseLoanIntegrationT
                 .interestRecalculationCompoundingMethod(0)//
                 .recalculationRestFrequencyType(2)//
                 .recalculationRestFrequencyInterval(1)//
-                .allowPartialPeriodInterestCalcualtion(false);//
+                .allowPartialPeriodInterestCalculation(false);//
     }
 
     @NonNull

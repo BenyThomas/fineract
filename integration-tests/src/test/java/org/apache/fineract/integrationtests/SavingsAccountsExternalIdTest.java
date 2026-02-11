@@ -33,12 +33,15 @@ import org.apache.fineract.client.models.PutSavingsAccountsAccountIdResponse;
 import org.apache.fineract.client.models.SavingsAccountData;
 import org.apache.fineract.client.util.Calls;
 import org.apache.fineract.integrationtests.client.IntegrationTest;
+import org.apache.fineract.integrationtests.common.savings.SavingsTestLifecycleExtension;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import retrofit2.Response;
 
+@ExtendWith({ SavingsTestLifecycleExtension.class })
 public class SavingsAccountsExternalIdTest extends IntegrationTest {
 
     private static final Logger LOG = LoggerFactory.getLogger(SavingsAccountsExternalIdTest.class);
@@ -72,7 +75,7 @@ public class SavingsAccountsExternalIdTest extends IntegrationTest {
         PutSavingsAccountsAccountIdRequest request = new PutSavingsAccountsAccountIdRequest();
         request.setLocale(locale);
         request.setNominalAnnualInterestRate(5.999);
-        Response<PutSavingsAccountsAccountIdResponse> response = okR(fineractClient().savingsAccounts.update21(EXTERNAL_ID, request, ""));
+        Response<PutSavingsAccountsAccountIdResponse> response = okR(fineractClient().savingsAccounts.update22(EXTERNAL_ID, request, ""));
 
         assertThat(response.isSuccessful()).isTrue();
         assertThat(response.body()).isNotNull();
@@ -101,7 +104,7 @@ public class SavingsAccountsExternalIdTest extends IntegrationTest {
         request.dateFormat(dateFormat);
         request.setLocale(locale);
         request.setActivatedOnDate(formattedDate);
-        Response<SavingsAccountData> response = okR(fineractClient().savingsAccounts.retrieveOne26(EXTERNAL_ID, false, null, "all"));
+        Response<SavingsAccountData> response = okR(fineractClient().savingsAccounts.retrieveOne27(EXTERNAL_ID, false, null, "all"));
 
         assertThat(response.isSuccessful()).isTrue();
         assertThat(response.body()).isNotNull();
@@ -129,7 +132,7 @@ public class SavingsAccountsExternalIdTest extends IntegrationTest {
         request.dateFormat(dateFormat);
         request.setLocale(locale);
         request.setActivatedOnDate(formattedDate);
-        Response<SavingsAccountData> response = okR(fineractClient().savingsAccounts.retrieveOne26(EXTERNAL_ID, false, null, "all"));
+        Response<SavingsAccountData> response = okR(fineractClient().savingsAccounts.retrieveOne27(EXTERNAL_ID, false, null, "all"));
 
         assertThat(response.isSuccessful()).isTrue();
         assertThat(response.body()).isNotNull();
@@ -144,7 +147,7 @@ public class SavingsAccountsExternalIdTest extends IntegrationTest {
         request.dateFormat(dateFormat);
         request.setLocale(locale);
         request.setActivatedOnDate(formattedDate);
-        Response<DeleteSavingsAccountsAccountIdResponse> response = okR(fineractClient().savingsAccounts.delete19(EXTERNAL_ID));
+        Response<DeleteSavingsAccountsAccountIdResponse> response = okR(fineractClient().savingsAccounts.delete20(EXTERNAL_ID));
 
         assertThat(response.isSuccessful()).isTrue();
         assertThat(response.body()).isNotNull();
@@ -159,7 +162,7 @@ public class SavingsAccountsExternalIdTest extends IntegrationTest {
         request.setLocale(locale);
         request.setActivatedOnDate(formattedDate);
         Response<SavingsAccountData> response = Calls
-                .executeU(fineractClient().savingsAccounts.retrieveOne26(EXTERNAL_ID, false, null, "all"));
+                .executeU(fineractClient().savingsAccounts.retrieveOne27(EXTERNAL_ID, false, null, "all"));
 
         assertThat(response.raw().code()).isEqualTo(404);
     }

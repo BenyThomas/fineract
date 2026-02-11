@@ -152,11 +152,6 @@
         <class>org.apache.fineract.portfolio.self.pockets.domain.PocketAccountMapping</class>
         <class>org.apache.fineract.portfolio.self.registration.domain.SelfServiceRegistration</class>
 
-        <!-- Command Module Entities -->
-
-        <class>org.apache.fineract.command.persistence.domain.CommandEntity</class>
-        <class>org.apache.fineract.command.persistence.converter.JsonAttributeConverter</class>
-
         <!-- Charge Module Entities -->
         <class>org.apache.fineract.portfolio.charge.domain.Charge</class>
 
@@ -207,6 +202,7 @@
         <class>org.apache.fineract.portfolio.loanaccount.domain.LoanTransactionRelation</class>
         <class>org.apache.fineract.portfolio.loanaccount.domain.LoanTransactionToRepaymentScheduleMapping</class>
         <class>org.apache.fineract.portfolio.loanaccount.domain.reaging.LoanReAgeParameter</class>
+        <class>org.apache.fineract.portfolio.loanaccount.domain.reamortization.LoanReAmortizationParameter</class>
         <class>org.apache.fineract.portfolio.loanaccount.loanschedule.domain.LoanRepaymentScheduleHistory</class>
         <class>org.apache.fineract.portfolio.loanaccount.rescheduleloan.domain.LoanRescheduleRequest</class>
         <class>org.apache.fineract.portfolio.loanproduct.domain.LoanProduct</class>

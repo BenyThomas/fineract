@@ -135,7 +135,7 @@ import org.springframework.util.CollectionUtils;
 @DiscriminatorColumn(name = "deposit_type_enum", discriminatorType = DiscriminatorType.INTEGER)
 @DiscriminatorValue("100")
 @SuppressWarnings({ "MemberName" })
-public class SavingsAccount extends AbstractAuditableWithUTCDateTimeCustom<Long> {
+public class SavingsAccount extends AbstractAuditableWithUTCDateTimeCustom<Long> implements IDepositAccountType {
 
     private static final Logger LOG = LoggerFactory.getLogger(SavingsAccount.class);
 
@@ -1042,7 +1042,7 @@ public class SavingsAccount extends AbstractAuditableWithUTCDateTimeCustom<Long>
                 if (MathUtil.isEmpty(overdraftAmount) && runningBalance.isLessThanZero() && !transaction.isAmountOnHold()) {
                     overdraftAmount = runningBalance.negated();
                 }
-                if (!calculateInterest || transaction.getId() == null) {
+                if (!calculateInterest || transaction.getId() == null || transaction.getOverdraftAmount(this.currency).isZero()) {
                     transaction.setOverdraftAmount(overdraftAmount);
                 } else if (!MathUtil.isEqualTo(overdraftAmount, transaction.getOverdraftAmount(this.currency))
                         && !transaction.isAccrual()) {
@@ -1346,11 +1346,13 @@ public class SavingsAccount extends AbstractAuditableWithUTCDateTimeCustom<Long>
 
                 if (charge.isEnablePaymentType() && charge.isEnableFreeWithdrawal()) { // discount transaction to
                                                                                        // specific paymentType
-                    if (paymentDetail.getPaymentType().getName().equals(charge.getCharge().getPaymentType().getName())) {
+                    if (paymentDetail != null && paymentDetail.getPaymentType() != null
+                            && paymentDetail.getPaymentType().getName().equals(charge.getCharge().getPaymentType().getName())) {
                         resetFreeChargeDaysCount(charge, transactionAmount, transactionDate, refNo);
                     }
                 } else if (charge.isEnablePaymentType()) { // normal charge-transaction to specific paymentType
-                    if (paymentDetail.getPaymentType().getName().equals(charge.getCharge().getPaymentType().getName())) {
+                    if (paymentDetail != null && paymentDetail.getPaymentType() != null
+                            && paymentDetail.getPaymentType().getName().equals(charge.getCharge().getPaymentType().getName())) {
                         charge.updateWithdralFeeAmount(transactionAmount);
                         this.payCharge(charge, charge.getAmountOutstanding(this.getCurrency()), transactionDate, backdatedTxnsAllowedTill,
                                 refNo);
@@ -3140,8 +3142,8 @@ public class SavingsAccount extends AbstractAuditableWithUTCDateTimeCustom<Long>
                 throw new PlatformApiDataValidationException(dataValidationErrors);
             }
 
-            if (!DateUtils.isEqual(annualFeeDueDate, transactionDate)) {
-                baseDataValidator.reset().failWithCodeNoParameterAddedToErrorCode("invalid.date");
+            if (DateUtils.isBefore(transactionDate, annualFeeDueDate)) {
+                baseDataValidator.reset().failWithCodeNoParameterAddedToErrorCode("transaction.before.dueDate");
                 throw new PlatformApiDataValidationException(dataValidationErrors);
             }
 
@@ -3268,10 +3270,6 @@ public class SavingsAccount extends AbstractAuditableWithUTCDateTimeCustom<Long>
 
     public LocalDate accountSubmittedOrActivationDate() {
         return getActivationDate() == null ? getSubmittedOnDate() : getActivationDate();
-    }
-
-    public DepositAccountType depositAccountType() {
-        return DepositAccountType.fromInt(depositType);
     }
 
     protected boolean isTransferInterestToOtherAccount() {
@@ -3825,10 +3823,6 @@ public class SavingsAccount extends AbstractAuditableWithUTCDateTimeCustom<Long>
         return this.minOverdraftForInterestCalculation;
     }
 
-    public Integer getDepositType() {
-        return this.depositType;
-    }
-
     public BigDecimal getMinRequiredBalance() {
         return this.minRequiredBalance;
     }
@@ -3889,5 +3883,10 @@ public class SavingsAccount extends AbstractAuditableWithUTCDateTimeCustom<Long>
         return retreiveOrderedNonInterestPostingTransactions().stream()
                 .map(transaction -> transaction.toSavingsAccountTransactionDetailsForPostingPeriod(this.currency, this.allowOverdraft))
                 .toList();
+    }
+
+    @Override
+    public DepositAccountType depositAccountType() {
+        return DepositAccountType.fromInt(100);
     }
 }

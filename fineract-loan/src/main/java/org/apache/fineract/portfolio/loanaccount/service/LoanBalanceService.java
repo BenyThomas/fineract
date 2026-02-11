@@ -94,6 +94,7 @@ public class LoanBalanceService {
 
     public void updateLoanSummaryDerivedFields(final Loan loan) {
         flushModeHandler.withFlushMode(FlushModeType.COMMIT, () -> {
+            loan.updateLoanScheduleDependentDerivedFields();
             if (loan.isNotDisbursed()) {
                 if (loan.getSummary() != null) {
                     loan.getSummary().zeroFields();
@@ -186,7 +187,7 @@ public class LoanBalanceService {
                 charge.resetToOriginal(loan.getCurrency());
             }
         }
-        loan.getLoanRepaymentScheduleDetail().setPrincipal(loan.getDisbursedAmount().subtract(disbursementDetail.principal()));
+        loan.getLoanRepaymentScheduleDetail().setPrincipal(loan.getDisbursedAmount().subtract(disbursementDetail.getPrincipal()));
         disbursementDetail.updateActualDisbursementDate(null);
         disbursementDetail.reverse();
         updateLoanSummaryDerivedFields(loan);

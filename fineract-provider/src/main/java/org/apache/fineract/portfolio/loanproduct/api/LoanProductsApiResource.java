@@ -46,10 +46,12 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
+import org.apache.fineract.accounting.common.AccountingConstants.LoanProductAccountingParams;
 import org.apache.fineract.accounting.common.AccountingDropdownReadPlatformService;
 import org.apache.fineract.accounting.glaccount.data.GLAccountData;
-import org.apache.fineract.accounting.producttoaccountmapping.data.ChargeOffReasonToGLAccountMapper;
+import org.apache.fineract.accounting.producttoaccountmapping.data.AdvancedMappingToExpenseAccountData;
 import org.apache.fineract.accounting.producttoaccountmapping.data.ChargeToGLAccountMapper;
+import org.apache.fineract.accounting.producttoaccountmapping.data.ClassificationToGLAccountData;
 import org.apache.fineract.accounting.producttoaccountmapping.data.PaymentTypeToGLAccountMapper;
 import org.apache.fineract.accounting.producttoaccountmapping.service.ProductToGLAccountMappingReadPlatformService;
 import org.apache.fineract.commands.domain.CommandWrapper;
@@ -82,6 +84,7 @@ import org.apache.fineract.portfolio.floatingrates.service.FloatingRatesReadPlat
 import org.apache.fineract.portfolio.fund.data.FundData;
 import org.apache.fineract.portfolio.fund.service.FundReadPlatformService;
 import org.apache.fineract.portfolio.loanaccount.api.LoanApiConstants;
+import org.apache.fineract.portfolio.loanaccount.api.LoanTransactionApiConstants;
 import org.apache.fineract.portfolio.loanaccount.domain.LoanBuyDownFeeCalculationType;
 import org.apache.fineract.portfolio.loanaccount.domain.LoanBuyDownFeeIncomeType;
 import org.apache.fineract.portfolio.loanaccount.domain.LoanBuyDownFeeStrategy;
@@ -175,7 +178,7 @@ public class LoanProductsApiResource {
     @Operation(summary = "Create a Loan Product", description = "Depending of the Accounting Rule (accountingRule) selected, additional fields with details of the appropriate Ledger Account identifiers would need to be passed in.\n"
             + "\n" + "Refer MifosX Accounting Specs Draft for more details regarding the significance of the selected accounting rule\n\n"
             + "Mandatory Fields: name, shortName, currencyCode, digitsAfterDecimal, inMultiplesOf, principal, numberOfRepayments, repaymentEvery, repaymentFrequencyType, interestRatePerPeriod, interestRateFrequencyType, amortizationType, interestType, interestCalculationPeriodType, transactionProcessingStrategyCode, accountingRule, isInterestRecalculationEnabled, daysInYearType, daysInMonthType\n\n"
-            + "Optional Fields: inArrearsTolerance, graceOnPrincipalPayment, graceOnInterestPayment, graceOnInterestCharged, graceOnArrearsAgeing, charges, paymentChannelToFundSourceMappings, feeToIncomeAccountMappings, penaltyToIncomeAccountMappings, chargeOffReasonToExpenseAccountMappings, includeInBorrowerCycle, useBorrowerCycle,principalVariationsForBorrowerCycle, numberOfRepaymentVariationsForBorrowerCycle, interestRateVariationsForBorrowerCycle, multiDisburseLoan,maxTrancheCount, outstandingLoanBalance,overdueDaysForNPA,holdGuaranteeFunds, principalThresholdForLastInstalment, accountMovesOutOfNPAOnlyOnArrearsCompletion, canDefineInstallmentAmount, installmentAmountInMultiplesOf, allowAttributeOverrides, allowPartialPeriodInterestCalcualtion,dueDaysForRepaymentEvent,overDueDaysForRepaymentEvent,enableDownPayment,disbursedAmountPercentageDownPayment,enableAutoRepaymentForDownPayment,repaymentStartDateType,enableBuyDownFee\n\n"
+            + "Optional Fields: inArrearsTolerance, graceOnPrincipalPayment, graceOnInterestPayment, graceOnInterestCharged, graceOnArrearsAgeing, charges, paymentChannelToFundSourceMappings, feeToIncomeAccountMappings, penaltyToIncomeAccountMappings, chargeOffReasonToExpenseAccountMappings, includeInBorrowerCycle, useBorrowerCycle,principalVariationsForBorrowerCycle, numberOfRepaymentVariationsForBorrowerCycle, interestRateVariationsForBorrowerCycle, multiDisburseLoan,maxTrancheCount, outstandingLoanBalance,overdueDaysForNPA,holdGuaranteeFunds, principalThresholdForLastInstalment, accountMovesOutOfNPAOnlyOnArrearsCompletion, canDefineInstallmentAmount, installmentAmountInMultiplesOf, allowAttributeOverrides, allowPartialPeriodInterestCalculation,dueDaysForRepaymentEvent,overDueDaysForRepaymentEvent,enableDownPayment,disbursedAmountPercentageDownPayment,enableAutoRepaymentForDownPayment,repaymentStartDateType,enableBuyDownFee\n\n"
             + "Additional Mandatory Fields for Cash(2) based accounting: fundSourceAccountId, loanPortfolioAccountId, interestOnLoanAccountId, incomeFromFeeAccountId, incomeFromPenaltyAccountId, writeOffAccountId, transfersInSuspenseAccountId, overpaymentLiabilityAccountId\n\n"
             + "Additional Mandatory Fields for periodic (3) and upfront (4)accrual accounting: fundSourceAccountId, loanPortfolioAccountId, interestOnLoanAccountId, incomeFromFeeAccountId, incomeFromPenaltyAccountId, writeOffAccountId, receivableInterestAccountId, receivableFeeAccountId, receivablePenaltyAccountId, transfersInSuspenseAccountId, overpaymentLiabilityAccountId\n\n"
             + "Additional Mandatory Fields if interest recalculation is enabled(true): interestRecalculationCompoundingMethod, rescheduleStrategyMethod, recalculationRestFrequencyType\n\n"
@@ -351,7 +354,10 @@ public class LoanProductsApiResource {
         Collection<PaymentTypeToGLAccountMapper> paymentChannelToFundSourceMappings;
         Collection<ChargeToGLAccountMapper> feeToGLAccountMappings;
         Collection<ChargeToGLAccountMapper> penaltyToGLAccountMappings;
-        List<ChargeOffReasonToGLAccountMapper> chargeOffReasonToGLAccountMappings;
+        List<AdvancedMappingToExpenseAccountData> chargeOffReasonToGLAccountMappings;
+        List<AdvancedMappingToExpenseAccountData> writeOffReasonsToExpenseAccountMappings;
+        List<ClassificationToGLAccountData> capitalizedIncomeClassificationToGLAccountMappings;
+        List<ClassificationToGLAccountData> buydowFeeClassificationToGLAccountMappings;
         if (loanProduct.hasAccountingEnabled()) {
             accountingMappings = this.accountMappingReadPlatformService.fetchAccountMappingDetailsForLoanProduct(productId,
                     loanProduct.getAccountingRule().getId().intValue());
@@ -362,8 +368,17 @@ public class LoanProductsApiResource {
                     .fetchPenaltyToIncomeAccountMappingsForLoanProduct(productId);
             chargeOffReasonToGLAccountMappings = this.accountMappingReadPlatformService
                     .fetchChargeOffReasonMappingsForLoanProduct(productId);
+            writeOffReasonsToExpenseAccountMappings = this.accountMappingReadPlatformService
+                    .fetchWriteOffReasonMappingsForLoanProduct(productId);
+            capitalizedIncomeClassificationToGLAccountMappings = accountMappingReadPlatformService
+                    .fetchClassificationMappingsForLoanProduct(productId,
+                            LoanProductAccountingParams.CAPITALIZED_INCOME_CLASSIFICATION_TO_INCOME_ACCOUNT_MAPPINGS);
+            buydowFeeClassificationToGLAccountMappings = accountMappingReadPlatformService.fetchClassificationMappingsForLoanProduct(
+                    productId, LoanProductAccountingParams.BUYDOWN_FEE_CLASSIFICATION_TO_INCOME_ACCOUNT_MAPPINGS);
             loanProduct = LoanProductData.withAccountingDetails(loanProduct, accountingMappings, paymentChannelToFundSourceMappings,
-                    feeToGLAccountMappings, penaltyToGLAccountMappings, chargeOffReasonToGLAccountMappings);
+                    feeToGLAccountMappings, penaltyToGLAccountMappings, chargeOffReasonToGLAccountMappings,
+                    writeOffReasonsToExpenseAccountMappings, capitalizedIncomeClassificationToGLAccountMappings,
+                    buydowFeeClassificationToGLAccountMappings);
         }
 
         if (settings.isTemplate()) {
@@ -464,6 +479,12 @@ public class LoanProductsApiResource {
                 .getValuesAsStringEnumOptionDataList(LoanBuyDownFeeStrategy.class);
         final List<StringEnumOptionData> buyDownFeeIncomeTypeOptions = ApiFacingEnum
                 .getValuesAsStringEnumOptionDataList(LoanBuyDownFeeIncomeType.class);
+        final List<CodeValueData> writeOffReasonOptions = codeValueReadPlatformService
+                .retrieveCodeValuesByCode(LoanApiConstants.WRITEOFFREASONS);
+        final List<CodeValueData> capitalizedIncomeClassificationOptions = codeValueReadPlatformService
+                .retrieveCodeValuesByCode(LoanTransactionApiConstants.CAPITALIZED_INCOME_CLASSIFICATION_CODE);
+        final List<CodeValueData> buydownFeeClassificationOptions = codeValueReadPlatformService
+                .retrieveCodeValuesByCode(LoanTransactionApiConstants.BUY_DOWN_FEE_CLASSIFICATION_CODE);
 
         return new LoanProductData(productData, chargeOptions, penaltyOptions, paymentTypeOptions, currencyOptions, amortizationTypeOptions,
                 interestTypeOptions, interestCalculationPeriodTypeOptions, repaymentFrequencyTypeOptions, interestRateFrequencyTypeOptions,
@@ -477,7 +498,8 @@ public class LoanProductsApiResource {
                 LoanScheduleProcessingType.getValuesAsEnumOptionDataList(), creditAllocationTransactionTypes,
                 creditAllocationAllocationTypes, supportedInterestRefundTypesOptions, chargeOffBehaviourOptions, chargeOffReasonOptions,
                 daysInYearCustomStrategyOptions, capitalizedIncomeCalculationTypeOptions, capitalizedIncomeStrategyOptions,
-                capitalizedIncomeTypeOptions, buyDownFeeCalculationTypeOptions, buyDownFeeStrategyOptions, buyDownFeeIncomeTypeOptions);
+                capitalizedIncomeTypeOptions, buyDownFeeCalculationTypeOptions, buyDownFeeStrategyOptions, buyDownFeeIncomeTypeOptions,
+                writeOffReasonOptions, capitalizedIncomeClassificationOptions, buydownFeeClassificationOptions);
     }
 
 }

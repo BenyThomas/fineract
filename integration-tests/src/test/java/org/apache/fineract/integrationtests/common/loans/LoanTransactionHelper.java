@@ -1709,6 +1709,22 @@ public class LoanTransactionHelper {
                 excludedTransactionTypes, page, size, sort));
     }
 
+    /**
+     * Helper method to create manual interest refund transaction
+     */
+    public PostLoansLoanIdTransactionsResponse createManualInterestRefund(Long loanId, Long targetTransactionId, String transactionDate,
+            Double amount, String externalId) {
+
+        PostLoansLoanIdTransactionsTransactionIdRequest request = new PostLoansLoanIdTransactionsTransactionIdRequest()
+                .transactionAmount(amount).dateFormat("dd MMMM yyyy").locale("en");
+
+        if (externalId != null) {
+            request.externalId(externalId);
+        }
+
+        return manualInterestRefund(loanId, targetTransactionId, request);
+    }
+
     // TODO: Rewrite to use fineract-client instead!
     // Example: org.apache.fineract.integrationtests.common.loans.LoanTransactionHelper.disburseLoan(java.lang.Long,
     // org.apache.fineract.client.models.PostLoansLoanIdRequest)
@@ -2584,11 +2600,11 @@ public class LoanTransactionHelper {
                 getAddAndDeleteDisbursementsAsJSON(approvalAmount, expectedDisbursementDate, disbursementData), jsonAttributeToGetBack);
     }
 
-    public String addAndDeleteDisbursementDetail(final Long loanId, PostAddAndDeleteDisbursementDetailRequest request) {
+    public CommandProcessingResult addAndDeleteDisbursementDetail(final Long loanId, PostAddAndDeleteDisbursementDetailRequest request) {
         return Calls.ok(FineractClientHelper.getFineractClient().loanDisbursementDetails.addAndDeleteDisbursementDetail(loanId, request));
     }
 
-    public String addAndDeleteDisbursementDetail(final Long loanId, final List<DisbursementDetail> disbursementDetails) {
+    public CommandProcessingResult addAndDeleteDisbursementDetail(final Long loanId, final List<DisbursementDetail> disbursementDetails) {
         return addAndDeleteDisbursementDetail(loanId, new PostAddAndDeleteDisbursementDetailRequest().locale("en")
                 .dateFormat("dd MMMM yyyy").disbursementData(disbursementDetails));
     }

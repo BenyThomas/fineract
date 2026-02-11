@@ -20,12 +20,15 @@ package org.apache.fineract.portfolio.loanaccount.service;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -36,6 +39,10 @@ import org.apache.fineract.infrastructure.event.business.domain.loan.LoanAdjustT
 import org.apache.fineract.infrastructure.event.business.domain.loan.transaction.LoanTransactionAccrualActivityPostBusinessEvent;
 import org.apache.fineract.infrastructure.event.business.domain.loan.transaction.LoanTransactionAccrualActivityPreBusinessEvent;
 import org.apache.fineract.infrastructure.event.business.service.BusinessEventNotifierService;
+import org.apache.fineract.organisation.monetary.domain.MonetaryCurrency;
+import org.apache.fineract.organisation.monetary.domain.Money;
+import org.apache.fineract.portfolio.loanaccount.data.TransactionChangeData;
+import org.apache.fineract.portfolio.loanaccount.domain.ChangedTransactionDetail;
 import org.apache.fineract.portfolio.loanaccount.domain.Loan;
 import org.apache.fineract.portfolio.loanaccount.domain.LoanAccountService;
 import org.apache.fineract.portfolio.loanaccount.domain.LoanRepaymentScheduleInstallment;
@@ -102,6 +109,77 @@ public class LoanAccrualActivityProcessingServiceImpl implements LoanAccrualActi
     }
 
     @Override
+    public void recalculateAccrualActivityTransaction(final Loan loan, final ChangedTransactionDetail changedTransactionDetail) {
+        if (!loan.getLoanProductRelatedDetail().isEnableAccrualActivityPosting()) {
+            return;
+        }
+
+        final List<LoanTransaction> accrualActivities = loan.getLoanTransactions().stream()
+                .filter(lt -> lt.isNotReversed() && lt.isAccrualActivity()).toList();
+
+        if (!accrualActivities.isEmpty()) {
+            final Map<LoanRepaymentScheduleInstallment, LoanTransaction> installmentsToAccrualActivities = new HashMap<>();
+
+            accrualActivities.forEach(accrualActivity -> {
+                final LoanTransaction newLoanTransaction = LoanTransaction.copyTransactionProperties(accrualActivity);
+                final List<LoanRepaymentScheduleInstallment> installments = loan.getRepaymentScheduleInstallments().stream()
+                        .filter(i -> !i.isDownPayment()).toList();
+                final LocalDate transactionDate = newLoanTransaction.getTransactionDate();
+
+                List<LoanRepaymentScheduleInstallment> targetInstallments = new ArrayList<>(installments.stream().filter(i -> i.getDueDate()
+                        .isEqual(transactionDate)
+                        || (DateUtils.isEqual(i.getObligationsMetOnDate(), transactionDate) && i.getDueDate().isAfter(transactionDate)))
+                        .toList());
+
+                AtomicBoolean transactionShouldBeReplayed = new AtomicBoolean(false);
+                if (targetInstallments.isEmpty()) {
+                    final Set<LocalDate> existingAccrualDates = accrualActivities.stream().map(LoanTransaction::getDateOf)
+                            .collect(Collectors.toSet());
+
+                    final Optional<LocalDate> nearestDueDate = installments.stream().map(LoanRepaymentScheduleInstallment::getDueDate)
+                            .filter(dueDate -> !existingAccrualDates.contains(dueDate)).min(Comparator.naturalOrder());
+
+                    if (nearestDueDate.isPresent()) {
+                        targetInstallments = installments.stream().filter(i -> i.getDueDate().equals(nearestDueDate.get()))
+                                .collect(Collectors.toList());
+                        transactionShouldBeReplayed.set(true);
+                    }
+                }
+
+                calculateAccrualActivity(newLoanTransaction, loan.getCurrency(), targetInstallments, transactionShouldBeReplayed);
+                targetInstallments.forEach(installment -> installmentsToAccrualActivities.put(installment, newLoanTransaction));
+
+                if (!LoanTransaction.transactionAmountsMatch(loan.getCurrency(), accrualActivity, newLoanTransaction)
+                        || transactionShouldBeReplayed.get()) {
+                    createNewTransaction(accrualActivity, newLoanTransaction, changedTransactionDetail);
+                }
+
+            });
+
+            final List<LoanRepaymentScheduleInstallment> installmentsToCreateNewAccrualActivities = loan.getRepaymentScheduleInstallments(
+                    i -> !i.isDownPayment() && DateUtils.isAfter(DateUtils.getBusinessLocalDate(), i.getDueDate())
+                            && !(installmentsToAccrualActivities.containsKey(i) && installmentsToAccrualActivities.get(i).isNotReversed()));
+
+            installmentsToCreateNewAccrualActivities
+                    .forEach(installment -> makeAccrualActivityTransaction(loan, installment, installment.getDueDate()));
+        }
+    }
+
+    protected void createNewTransaction(LoanTransaction loanTransaction, LoanTransaction newLoanTransaction,
+            ChangedTransactionDetail changedTransactionDetail) {
+        loanTransaction.reverse();
+
+        if (newLoanTransaction.isNotReversed()) {
+            loanTransaction.updateExternalId(null);
+            newLoanTransaction.copyLoanTransactionRelations(loanTransaction.getLoanTransactionRelations());
+            // Adding Replayed relation from newly created transaction to reversed transaction
+            newLoanTransaction.getLoanTransactionRelations().add(LoanTransactionRelation.linkToTransaction(newLoanTransaction,
+                    loanTransaction, LoanTransactionRelationTypeEnum.REPLAYED));
+        }
+        changedTransactionDetail.addTransactionChange(new TransactionChangeData(loanTransaction, newLoanTransaction));
+    }
+
+    @Override
     @Transactional
     public void processAccrualActivityForLoanClosure(final @NonNull Loan loan) {
         if (!loan.getLoanProductRelatedDetail().isEnableAccrualActivityPosting()) {
@@ -134,7 +212,7 @@ public class LoanAccrualActivityProcessingServiceImpl implements LoanAccrualActi
         for (LoanRepaymentScheduleInstallment installment : loan.getRepaymentScheduleInstallments()) {
             if (!installment.isDownPayment() && !installment.isAdditional() && DateUtils.isBefore(installment.getDueDate(), closureDate)) {
                 List<LoanTransaction> installmentAccruals = accrualActivities.stream()
-                        .filter(t -> t.getDateOf().isEqual(installment.getDueDate())).toList();
+                        .filter(t -> t.getDateOf().isEqual(installment.getDueDate()) && t.isNotReversed()).toList();
 
                 if (installmentAccruals.isEmpty()) {
                     // No AAT for this installment; create one
@@ -203,6 +281,49 @@ public class LoanAccrualActivityProcessingServiceImpl implements LoanAccrualActi
 
         if (installments.isEmpty()) {
             lastAccrualActivityMarkedToReverse.ifPresent(this::reverseAccrualActivityTransaction);
+        }
+    }
+
+    private void calculateAccrualActivity(LoanTransaction loanTransaction, MonetaryCurrency currency,
+            List<LoanRepaymentScheduleInstallment> targetInstallments, AtomicBoolean transactionShouldBeReplayed) {
+        if (targetInstallments.isEmpty()) {
+            return;
+        }
+        AtomicBoolean isReset = new AtomicBoolean(false);
+        targetInstallments.forEach(currentInstallment -> {
+            if (currentInstallment.isNotFullyPaidOff() && ((currentInstallment.getDueDate().isAfter(loanTransaction.getTransactionDate())
+                    && !currentInstallment.getDueDate().isBefore(DateUtils.getBusinessLocalDate()))
+                    || (currentInstallment.getDueDate().isEqual(loanTransaction.getTransactionDate())
+                            && loanTransaction.getTransactionDate().equals(DateUtils.getBusinessLocalDate())))) {
+                loanTransaction.reverse();
+                transactionShouldBeReplayed.set(false);
+            } else {
+                if (!isReset.get()) {
+                    loanTransaction.resetDerivedComponents();
+                    isReset.set(true);
+                }
+                final Money principalPortion = Money.zero(currency);
+                Money interestPortion = currentInstallment.getInterestCharged(currency);
+                Money feeChargesPortion = currentInstallment.getFeeChargesCharged(currency);
+                Money penaltyChargesPortion = currentInstallment.getPenaltyChargesCharged(currency);
+
+                loanTransaction.updateComponentsAndTotal(principalPortion, interestPortion, feeChargesPortion, penaltyChargesPortion);
+                final Loan loan = loanTransaction.getLoan();
+                if ((loan.isClosedObligationsMet() || loanBalanceService.isOverPaid(loan)) && currentInstallment.isObligationsMet()
+                        && currentInstallment.isTransactionDateWithinPeriod(currentInstallment.getObligationsMetOnDate())) {
+                    loanTransaction.updateTransactionDate(currentInstallment.getObligationsMetOnDate());
+                    transactionShouldBeReplayed.set(false);
+                } else {
+                    if (transactionShouldBeReplayed.get()) {
+                        loanTransaction.updateTransactionDate(currentInstallment.getDueDate());
+                    }
+                }
+            }
+        });
+        if (MathUtil.isZero(MathUtil.nullToZero(MathUtil.add(loanTransaction.getInterestPortion(), loanTransaction.getFeeChargesPortion(),
+                loanTransaction.getPenaltyChargesPortion())))) {
+            loanTransaction.reverse();
+            transactionShouldBeReplayed.set(false);
         }
     }
 

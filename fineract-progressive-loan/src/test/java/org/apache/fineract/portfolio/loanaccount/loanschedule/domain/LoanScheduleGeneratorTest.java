@@ -44,7 +44,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 @ExtendWith(MockitoExtension.class)
 class LoanScheduleGeneratorTest {
 
-    private static final ProgressiveEMICalculator emiCalculator = new ProgressiveEMICalculator();
+    private static final ProgressiveEMICalculator emiCalculator = new ProgressiveEMICalculator(mock(ScheduledDateGenerator.class));
     private static final ApplicationCurrency APPLICATION_CURRENCY = new ApplicationCurrency("USD", "USD", 2, 1, "USD", "$");
     private static final CurrencyData CURRENCY = APPLICATION_CURRENCY.toData();
     private static final BigDecimal DISBURSEMENT_AMOUNT = BigDecimal.valueOf(192.22);
@@ -65,7 +65,7 @@ class LoanScheduleGeneratorTest {
         LoanRepaymentScheduleModelData modelData = new LoanRepaymentScheduleModelData(LocalDate.of(2024, 1, 1), CURRENCY,
                 DISBURSEMENT_AMOUNT, DISBURSEMENT_DATE, NUMBER_OF_REPAYMENTS, REPAYMENT_FREQUENCY, REPAYMENT_FREQUENCY_TYPE,
                 NOMINAL_INTEREST_RATE, false, DaysInMonthType.DAYS_30, DaysInYearType.DAYS_360, null, null, null, false, null,
-                InterestMethod.DECLINING_BALANCE, true);
+                InterestMethod.DECLINING_BALANCE, true, false);
 
         ScheduledDateGenerator scheduledDateGenerator = new DefaultScheduledDateGenerator();
         ProgressiveLoanScheduleGenerator generator = new ProgressiveLoanScheduleGenerator(scheduledDateGenerator, emiCalculator,
@@ -103,7 +103,7 @@ class LoanScheduleGeneratorTest {
         LoanRepaymentScheduleModelData modelData = new LoanRepaymentScheduleModelData(LocalDate.of(2024, 1, 1), CURRENCY,
                 DISBURSEMENT_AMOUNT_100, LocalDate.of(2024, 1, 1), NUMBER_OF_REPAYMENTS, REPAYMENT_FREQUENCY, REPAYMENT_FREQUENCY_TYPE,
                 NOMINAL_INTEREST_RATE, true, DaysInMonthType.DAYS_30, DaysInYearType.DAYS_360, DOWN_PAYMENT_PORTION, null, null, false,
-                null, InterestMethod.DECLINING_BALANCE, true);
+                null, InterestMethod.DECLINING_BALANCE, true, false);
 
         ScheduledDateGenerator scheduledDateGenerator = new DefaultScheduledDateGenerator();
         ProgressiveLoanScheduleGenerator generator = new ProgressiveLoanScheduleGenerator(scheduledDateGenerator, emiCalculator,
